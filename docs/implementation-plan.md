@@ -3,8 +3,8 @@
 **Implementation plan (draft)** · 2026-08-31
 Status: **plan only** — no code is written until Omarchy Quattro is running on this machine.
 
-Reference implementation: `lerd Glance` (`/home/m0u/Projects/Research/lerd-omarchy-glance`)
-HubDev CLI source: `/home/m0u/Projects/CurrentClients/HubDev/devhub-go` (Go 1.25, Wails + Svelte GUI)
+Reference implementation: `lerd Glance` (`~/Projects/Research/lerd-omarchy-glance`)
+HubDev CLI source: `~/Projects/HubDev/devhub-go` (Go 1.25, Wails + Svelte GUI)
 Plugin spec: <https://plugins.omarchy.org/develop.html>
 
 ---
