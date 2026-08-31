@@ -1,0 +1,12 @@
+# Local-only know-how notes — never committed
+/docs/lessons-learned/
+
+# OS / editor noise
+.DS_Store
+._*
+*.swp
+.idea/
+.vscode/
+
+# Node (tests)
+node_modules/
