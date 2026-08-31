@@ -3,12 +3,11 @@
 > The state of your [HubDev](https://hubdev.io) environment at a glance in the Omarchy
 > Quattro bar. Sites, services, PHP versions, Caddy and Docker — without raising the GUI.
 
-**Status: planning. There is no code in this repository yet.**
+**Status: planning. There is no code in this repository yet — but the platform is ready.**
 
-Omarchy Quattro (QuickShell) is not yet installed on the development machine — it is still
-running Omarchy 3.8.5, where neither QuickShell nor `omarchy plugin` exists. Implementation
-starts once Quattro is up, so every phase can be built and tested against a live bar rather
-than guessed at.
+Omarchy **Quattro 4.0.2-1** (Quickshell 0.3.1) is running on the development machine, so
+`omarchy plugin` and a live bar are available and every phase can be built and tested for
+real rather than guessed at. Phase 0 is the next thing to run.
 
 ## What is here
 
@@ -43,10 +42,14 @@ widget needs as JSON-tagged structs, so the plan adds `hubdev snapshot --json` t
 spawns it from QML, rather than building a daemon. See §4 of the plan for the four
 alternatives and why they lost.
 
-**The open unknown.** The Omarchy plugin docs list `QtQuick`, `Quickshell`, `qs.Ui` and
-`qs.Commons` — not `Quickshell.Io`, where `Process` lives. Whether a plugin may spawn a
-subprocess decides between a full plugin and a read-only one. It is the first thing Phase 0
-answers, and nothing else should be built before it.
+**The unknown that was open.** The Omarchy plugin docs list `QtQuick`, `Quickshell`, `qs.Ui`
+and `qs.Commons` — not `Quickshell.Io`, where `Process` lives, and whether a plugin may spawn
+a subprocess decided between a full plugin and a read-only one. Reading the installed shell
+answered it: there is no import allowlist in the plugin loader, and `omarchy.agents` — a
+first-party bar widget — imports `Quickshell.Io` and runs `Process` today. A Phase 0 smoke
+test confirms it from a real third-party plugin. What is left is smaller: enumerating which
+`hubdev` verbs can trigger a sudo prompt, since one of those inside a QML `Process` hangs the
+shell with no visible cause.
 
 ## Planned layout
 

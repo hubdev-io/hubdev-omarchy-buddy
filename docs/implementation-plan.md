@@ -1,11 +1,15 @@
 # HubDev Buddy — Omarchy Quattro plugin
 
-**Implementation plan (draft)** · 2026-08-31
-Status: **plan only** — no code is written until Omarchy Quattro is running on this machine.
+**Implementation plan (draft)** · 2026-08-31 · **revised 2026-08-31, post-upgrade**
+Status: **unblocked** — Omarchy Quattro is running on this machine. `omarchy plugin` exists,
+`~/.config/omarchy/plugins/` is empty, and no code is written yet. Nothing in this plan is
+waiting on the platform any more; Phase 0 can run today.
 
 Reference implementation: `lerd Glance` (`~/Projects/Research/lerd-omarchy-glance`)
 HubDev CLI source: `~/Projects/HubDev/devhub-go` (Go 1.25, Wails + Svelte GUI)
 Plugin spec: <https://plugins.omarchy.org/develop.html>
+Platform verified on this machine, 2026-08-31: Omarchy **4.0.2-1** · Quickshell **0.3.1** ·
+HubDev **v1.28.0** · manifest `schemaVersion 1` (enforced by `/usr/bin/omarchy-plugin-validate`).
 
 ---
 
@@ -22,6 +26,9 @@ opening a terminal. Quiet when healthy, obvious when broken.
 | Plugin ID | `io.hubdev.buddy` (reverse-DNS of `hubdev.io`; `omarchy.*` is reserved) |
 | Display name | HubDev Buddy |
 | Kinds | `bar-widget` (a `Panel.qml` is loaded by the widget, not registered as a separate kind) |
+| Entry point | `entryPoints.barWidget` — the validator requires it for kind `bar-widget`. (`omarchy.agents` points this key at `Panel.qml`; this plan points it at `BarWidget.qml`. The key is fixed, the filename is ours.) |
+| Placement | `barWidget.defaultSection: "right"` — validator accepts `left`/`center`/`right` |
+| Settings | `barWidget.defaults` + `barWidget.schema` in the manifest: typed keys (`integer`/`enum`/`string`/`path`) the shell renders and persists. This is where the view toggle and refresh interval live — see §5.2. |
 | Repo | `hubdev-omarchy-buddy` (this directory) |
 | License | MIT |
 
@@ -69,7 +76,9 @@ A container-resources meter would describe a minority of what HubDev runs. See �
 
 ## 3. The gap: HubDev is not lerd
 
-Verified on this machine against HubDev **v1.27.0**, 2026-08-31.
+Verified on this machine against HubDev **v1.28.0**, re-checked 2026-08-31 after the Quattro
+upgrade: `site:list --json` still prints the ANSI table and there is still no `snapshot`
+command. The gap below is current, not historical.
 
 | | lerd | HubDev |
 |---|---|---|
@@ -80,7 +89,7 @@ Verified on this machine against HubDev **v1.27.0**, 2026-08-31.
 | Other local endpoints | — | Caddy admin API on `:2019` (routes, PKI) |
 | Runtime model | containers only | hybrid: native Caddy + multi-version PHP-FPM + docker/native services |
 | Privilege | user | some paths use a sudoers rule (`sudoers-installed`); `sudo -n` currently fails |
-| Source access | third-party | **full** — the whole `hubdev` organization, CLI source included (simply not cloned on this machine) |
+| Source access | third-party | **full** — the whole `hubdev` organization, CLI source included, cloned at `~/Projects/HubDev/devhub-go` |
 
 ### 3.1 What the source confirms
 
@@ -159,6 +168,15 @@ A' costs one `.timer`/`.service` pair shipped with the plugin and keeps every ot
 identical. It loses on-demand refresh (the file is only as fresh as the timer) and cannot
 run mutations — so under A' the plugin is **read-only**, which is an acceptable v1.
 
+**Update (post-upgrade): rung A is available, and rung A' has a first-party precedent.**
+Omarchy's own `omarchy.agents` — a `bar-widget`, the same kind Buddy claims — imports
+`Quickshell.Io` in both its entry point and its worker, and drives `Process` with
+`stdout: StdioCollector { waitForEnd: true; onStreamFinished: ... }`. That is precisely the
+shape `hubdev snapshot --json` needs, already shipping in the bar. The same plugin is also a
+worked example of A': an external updater (`omarchy-agent-usage-update`) writes JSON records
+under `~/.local/state/omarchy/agents/usage/` and the QML only discovers and watches them with
+`FileView`. Both rungs are demonstrated in-tree rather than assumed. See R1.
+
 **Why D/E exist anyway.** The plugin must be able to run before the CLI ships `--json`.
 Both live behind a **source adapter seam**: `Source.js` exposes one function,
 `snapshot(cb)`, returning the canonical shape from §6. Swapping `SourceJson` ↔ `SourceFiles`
@@ -232,7 +250,8 @@ issue list, or nothing more if there is nothing wrong.
 
 ### 5.2 In the panel
 
-Two views behind one toggle, remembered in the bar's settings — dense table (~420px) and
+Two views behind one toggle, persisted through the manifest's `barWidget.defaults` /
+`barWidget.schema` block (§1) rather than a file of our own — dense table (~420px) and
 columns (~760px), following lerd's proportions. Empty sections are not drawn.
 
 1. **Environment** — Caddy (state, version, route count) · every installed PHP with the
@@ -322,7 +341,9 @@ views never branch on `undefined`:
 ```
 
 `Model.unreachable()` returns the same shape with `reachable: false` and one issue —
-"HubDev is not running", or "HubDev 1.27 is too old; snapshot needs 1.28+".
+"HubDev is not running", or "HubDev <version> is too old; snapshot needs <target>" — where
+the target is the release picked in §10 Q1. (v1.28.0 is current and does *not* carry the
+contract, so this message cannot be pinned to a number until Phase 1 lands.)
 
 ---
 
@@ -337,26 +358,39 @@ both sides converge on them. The plugin can be feature-complete and fully tested
 Rough sizing, in focused sessions rather than calendar time: **P0** 1 · **P1** 1–2 (HubDev
 repo — revised down, see §3.1) · **P2** 2 · **P3** 3–4 · **P4** 2–3 · **P5** 1.
 
-### Phase 0 — Readiness spike *(first session after the Quattro upgrade)*
+### Phase 0 — Readiness spike *(unblocked — Quattro is running)*
 
-Verification only. Everything downstream assumes these answers.
+Verification only. Everything downstream assumes these answers. Three of the seven are now
+answered from the installed shell and the CLI source; the spike is correspondingly smaller,
+but it should still be *run*, because reading a validator is not the same as loading a plugin.
 
-- [ ] `omarchy plugin clone omarchy.clock --edit` works; scaffold understood.
-- [ ] **Can a plugin import `Quickshell.Io` and use `Process`?** The docs list `QtQuick`,
-      `Quickshell`, `qs.Ui`, `qs.Commons` — `Quickshell.Io` is *not* named. **If `Process`
-      is unavailable to plugins, approach A is dead and the plan pivots to B (the loopback
-      daemon) — this is the single highest-value unknown.**
+- [x] ~~`omarchy plugin clone omarchy.clock --edit` works; scaffold understood.~~ **The
+      command exists** (`omarchy plugin add|clone|enable|disable|list|remove|update|validate`).
+      Still worth doing once to see the scaffold.
+- [x] ~~**Can a plugin import `Quickshell.Io` and use `Process`?**~~ **Answered from the
+      installed shell: yes.** `/usr/lib/qt6/qml/Quickshell/Io/` is present;
+      `PluginRegistry.qml` filters *entry-point paths*, not imports — its "sandbox" is path
+      containment, and there is no import allowlist anywhere in the loader; and the
+      first-party `bar-widget` `omarchy.agents` imports `Quickshell.Io` and runs `Process`
+      (§4). The docs' `QtQuick`/`Quickshell`/`qs.Ui`/`qs.Commons` list is what plugins are
+      *documented* against, not what the shell enforces. **Approach A stands; the pivot to B
+      is off the table.** Confirm with the smoke test below before building on it.
 - [ ] `qmllint -I "$OMARCHY_PATH/shell"` runs clean on the scaffold.
 - [ ] Which `hubdev` verbs can trigger a sudo prompt (read `/etc/sudoers.d/*`, and test each
-      candidate verb with `sudo -k` set).
+      candidate verb with `sudo -k` set). **Still fully open, and now the highest-value
+      unknown left** — it is what bounds the Phase 4 allowlist (R3, G11).
 - [x] ~~Does `hubdev status` take a lock on the config directory?~~ **Answered from source:
       no.** No file locking exists in `devhub-go`; concurrency is in-process `sync.RWMutex`.
       Polling reads are safe. *(Writes remain last-writer-wins against the GUI — see §3.1.)*
 - [ ] Latency of `status` / `docker:ps` with all services **running**, not stopped.
 - [ ] Does Quickshell expose bar visibility / session idle, so polling can be suspended?
+      Start from `omarchy.agents`' `activation: "on-demand"` and its `Timer` usage.
 
-**Deliverable:** a throwaway widget showing the site count from `hubdev site:list`.
-**Exit criteria:** a number, from `hubdev`, in the Quattro bar.
+**Deliverable:** a throwaway widget showing the site count from `hubdev site:list`, installed
+as a real third-party plugin at `~/.config/omarchy/plugins/io.hubdev.spike/` — not a
+first-party one — so the import question is answered where it actually matters.
+**Exit criteria:** `omarchy plugin validate` passes, and a number, from `hubdev`, appears in
+the Quattro bar.
 
 ### Phase 1 — The JSON contract *(HubDev CLI, ships independently)*
 
@@ -435,9 +469,16 @@ hubdev-omarchy-buddy/
 ```
 
 Local dev loop: develop in `~/.config/omarchy/plugins/io.hubdev.buddy` symlinked — **no:
-the validator rejects symlinks.** Develop directly in the plugins directory with this repo
-as the git remote, or `rsync` on save. Saved QML reloads automatically; `rescanPlugins` is
-only needed for manifest changes.
+the validator rejects symlinks.** Confirmed in `/usr/bin/omarchy-plugin-validate`, which
+fails on the first symlink found anywhere in the folder. It *prunes `.git`*, though, with the
+comment "installed plugins are git checkouts" — so **a git checkout at
+`~/.config/omarchy/plugins/io.hubdev.buddy` with this repo as `origin` is the sanctioned
+loop**, not a workaround. `rsync` on save is the fallback. Saved QML reloads automatically;
+`rescanPlugins` is only needed for manifest changes.
+
+Run `omarchy plugin validate ~/.config/omarchy/plugins/io.hubdev.buddy` before every commit
+that touches `manifest.json` — it mirrors the checks in `shell/services/PluginRegistry.qml`,
+so it refuses exactly what the running shell would refuse.
 
 ---
 
@@ -445,11 +486,11 @@ only needed for manifest changes.
 
 | | Risk | Mitigation |
 |---|---|---|
-| R1 | **`Process` may not be available to plugins.** Kills approach A. | Phase 0 gate. Pivot to B (daemon) — the seam makes it a one-line change in the widget, but it moves ~2 weeks of work into HubDev. |
+| R1 | ~~**`Process` may not be available to plugins.** Kills approach A.~~ **Largely closed** (§7 P0): the loader enforces no import allowlist and a first-party `bar-widget` already uses `Quickshell.Io`/`Process`. | Residual risk is only that a *third-party* plugin behaves differently — settled by the Phase 0 smoke test, which is now a confirmation rather than a coin flip. The A' and B rungs stay documented as insurance, not as the expected path. |
 | R2 | Poll cost grows with running containers; `status` was already 374ms *stopped*. | One aggregate call · `--include` tiers · TTL cache in `hubdev` · coalescing · suspend when hidden. Re-measure in Phase 0 under load. |
 | R3 | A verb prompts for sudo and hangs the shell process invisibly. | Enumerate escalating verbs in Phase 0; exclude them from the allowlist. Hard timeout on every `Process`. |
-| R4 | The contract lands late relative to the plugin. *(Downgraded: the CLI source is fully available — it is simply not cloned here. This is a scheduling risk, not an access one.)* | Phases 1 and 2 run in parallel against committed fixtures, so neither blocks the other. `SourceFiles.js` remains as a spike-only fallback, not a shipping path. |
-| R5 | Quattro plugin API is young; `schemaVersion 1` may move. | Pin, validate in CI, do not ship before Quattro is stable here. |
+| R4 | The contract lands late relative to the plugin. *(Downgraded: the CLI source is fully available and cloned at `~/Projects/HubDev/devhub-go`. This is a scheduling risk, not an access one — and with v1.28.0 shipping without `snapshot`, it is the risk most likely to set the v1 date.)* | Phases 1 and 2 run in parallel against committed fixtures, so neither blocks the other. `SourceFiles.js` remains as a spike-only fallback, not a shipping path. |
+| R5 | Quattro plugin API is young; `schemaVersion 1` may move. | Now running Omarchy 4.0.2-1, where the validator requires `schemaVersion` to be exactly the JSON number `1`. Pin it, run `omarchy plugin validate` in CI, and re-check on every Omarchy release — the API is young enough that a `2` is a question of when. |
 | R6 | Secrets on screen: `services.yml` passwords, `license.json` key, tokens in logs. | Strip at the contract; no log surfaces in v1; a test that greps rendered strings for known secrets. |
 | R7 | The GUI and the widget mutate concurrently and disagree. | Snapshot is read-only truth + refresh burst after every mutation; never cache mutable state in the widget. |
 | R8 | Overlap with HubDev's own GUI — why does this exist? | It is a *glance*, not a console: zero window switching, and it deliberately refuses the long/destructive work that belongs in the GUI. |
@@ -459,9 +500,10 @@ only needed for manifest changes.
 ## 10. Open questions
 
 1. ~~Is the HubDev CLI source yours to change?~~ **Answered: yes** — full access to the
-   `hubdev` organization including the CLI source and binary; it is just not cloned on this
-   machine (Phase 1 step 0). The remaining question is narrower: **which HubDev release
-   carries `snapshot --json`**, since the plugin must version-gate against it.
+   `hubdev` organization including the CLI source and binary, cloned at
+   `~/Projects/HubDev/devhub-go`. The remaining question is narrower:
+   **which HubDev release carries `snapshot --json`**, since the plugin must version-gate
+   against it. Current is v1.28.0 and does not, so the answer is v1.29.0 at the earliest.
 2. **Public or personal?** A marketplace plugin makes this part of HubDev's product story
    (and a good answer to lerd Glance); a personal plugin can skip Phase 5 entirely.
 3. **Read-only v1, or actions from the start?** Read-only halves the surface and removes
@@ -483,8 +525,9 @@ parallel; the **fixtures are the contract**, hand-written first from the `hubdev
 that demonstrably already exists. The plugin reaches feature-complete against fixtures with
 no CLI change at all. R4 shrinks from "blocker" to "integration date".
 **Update (post-grill):** the premise was weaker than stated — the CLI source *is* fully
-available, just not cloned here. The revision stands on its own merits (parallel phases,
-fixtures as the contract), but R4 drops from a real risk to a scheduling note.
+available, and has since been cloned to `devhub-go` (§3.1 was written from it). The
+revision stands on its own merits (parallel phases, fixtures as the contract), but R4 drops
+from a real risk to a scheduling note.
 
 ### ✅ G2 — "You bet the whole plan on `Process`, which the docs never mention."
 The Omarchy plugin docs list `QtQuick`, `Quickshell`, `qs.Ui`, `qs.Commons`. `Quickshell.Io`
@@ -494,6 +537,12 @@ lazy.** *Revised §4:* there is a middle rung. QML's `XMLHttpRequest` is proven 
 (lerd uses it) and reads `file://`, so a systemd user timer writing
 `~/.cache/hubdev/snapshot.json` gives a read-only plugin with **no Process and no daemon**.
 Ladder: `Process` → `XHR file://` → `XHR http://`.
+**Update (post-upgrade): the challenge was right to demand a ladder, and the ladder is no
+longer needed for its original purpose.** With Quattro installed, `Quickshell.Io` is present,
+the loader enforces no import allowlist, and a first-party `bar-widget` already runs
+`Process` — so rung one holds (§7 P0). The ladder survives as insurance against a future
+tightening of the plugin API, and rung A' turns out to describe how `omarchy.agents` actually
+works, which makes it a better-evidenced fallback than when it was written.
 
 ### ✅ G3 — "Polling a CLI at 5s is not the same as polling HTTP at 5s."
 lerd's 5s is seven HTTP round-trips to a running process. Ours is a Go binary cold-start
@@ -574,6 +623,17 @@ put in its place is smaller but real — **writes are last-writer-wins**, with n
 between the widget, the CLI and the GUI. That is pre-existing HubDev behaviour, not something
 this plugin introduces, but the plugin makes it easier to hit.
 
-**One unknown now carries the plan: R1 — whether an Omarchy plugin may use
-`Quickshell.Io.Process`.** It is the first thing Phase 0 answers, it decides between a full
-plugin and a read-only one, and nothing else should be built before it.
+**Post-upgrade revision.** The unknown that carried the plan — R1, whether a plugin may use
+`Quickshell.Io.Process` — is closed in everything but a live smoke test: the module is
+installed, the loader has no import allowlist, and `omarchy.agents` does exactly this from a
+`bar-widget` today. The plan no longer has a single-point failure that could halve it.
+
+**What carries it now is smaller and more ordinary: the sudo enumeration (R3/G11).** It does
+not threaten the architecture, only the size of the Phase 4 allowlist — a verb that can
+escalate is dropped no matter how useful, and a verb that escalates *unexpectedly* hangs the
+shell process invisibly. It is the one Phase 0 item that cannot be answered by reading source,
+because it depends on a sudoers rule this machine will not disclose without a password.
+
+Second, and unchanged: **the contract does not exist yet.** v1.28.0 has no `snapshot --json`,
+so Phase 2 runs against hand-written fixtures exactly as G1 forced it to. That is a schedule
+dependency, not a risk — but it is the thing most likely to make v1 later than it looks.
