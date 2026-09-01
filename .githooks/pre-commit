@@ -1,0 +1,4 @@
+#!/bin/sh
+# Refuse to commit anything this public repo must not carry.
+# Enable once per clone:  git config core.hooksPath .githooks
+exec node "$(git rev-parse --show-toplevel)/tools/privacy-scan.mjs" --staged

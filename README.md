@@ -105,6 +105,23 @@ process-per-call CLI, and a telemetry event that a 30-second poll would have fir
 thousand times a day. §11 is an adversarial review of the plan by itself: thirteen challenges,
 seven of which changed it.
 
+## Privacy of the test data
+
+The fixtures were captured from a working machine, so the sites in them are
+**stand-ins** — `beacon.lab`, `clinic.lab`, `sonata.craft` and so on — chosen to
+preserve the distribution the tests rest on (the TLD spread and the sort order
+both carry assertions) without naming anything real.
+
+`npm run privacy` scans every tracked file for real home paths, client project
+names and secret-shaped values, and `npm test` runs the same scan. The denylist
+is **hashed**, not plaintext: a scanner carrying a list of client names would be
+the leak it exists to prevent. To have git refuse the commit instead of CI
+refusing the push, enable the hook once per clone:
+
+```
+git config core.hooksPath .githooks
+```
+
 ## License
 
 MIT
