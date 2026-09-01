@@ -11,11 +11,11 @@ Omarchy **Quattro 4.0.2-1** (Quickshell 0.3.1). `io.hubdev.buddy` is installed a
 a mark that stays quiet when the environment is healthy, gains an **amber dot** when something
 needs attention, and a **red dot** when nothing will serve. Clicking it opens a panel with
 Sites, Services and Environment — and *Needs attention* only when there is something to say —
-in either a dense list or three columns, toggled with `v` and remembered across restarts.
+in either a dense list or three columns, toggled with `Alt+V` and remembered across restarts.
 Clicking a site opens it in the desktop's browser; hovering one reveals three more, in place
 of the PHP version they cover — **a terminal in the project, the project in the file manager,
 the project in the editor**. All three states are verified on screen, and the QML-free logic
-has 99 tests over 10 fixtures.
+has 129 tests over 10 fixtures.
 
 Each of those three is a HubDev verb (`site:terminal`, `folder`, `edit`), and each resolves
 *your* default rather than naming a program: the terminal from `$TERMINAL`, the file manager
@@ -25,6 +25,17 @@ no output anyone reads, nothing destructive, no chance of a sudo prompt. `Action
 the allowlist and the argv, and node tests it — including the refusals, because `hubdev`
 parses its own flags out of the argv it is handed and a site named `--print` must never
 become one.
+
+**Just start typing.** The panel already holds the keyboard when it opens, so there is no
+field to click into and no shortcut to remember: the first character raises a slim box under
+the header and narrows Sites and Services to what matches, with the matched letters marked in
+the accent colour. The match is a *subsequence* — `cpa` finds `clinic-portal-app.test` the way
+a launcher would — but a bounded one, which is the part that matters: after the first
+character, every next one must either continue a run or begin a word (`-`, `.`, `_`, `/`).
+Without that bound a subsequence matcher matches half the list on coincidence; with it,
+typing a site's name gets you that site. Parked sites are searched too, which is the best
+moment the feature has — the collapsed row is exactly what was hiding the one you are looking
+for. `Enter` opens the top match, `Esc` clears the filter and only then closes the panel.
 
 **`hubdev snapshot --json` is implemented** in HubDev's own CLI, and the widget's
 `SourceJson.parse()` → `Model.summarize()` reduces its live output to `level: ok`,
@@ -93,7 +104,9 @@ BarWidget.qml                     the only file that does I/O
 Mark.qml                          the glyph and its state dot
 SourceJson.js                     the transport seam (the import line is the seam)
 Model.js  Theme.js                pure JS, QML-free, tested under node
-Panel.qml                         the popout: header, view, hand-offs
+Panel.qml                         the popout: header, search, view, hand-offs
+KeyCatcher.qml                    the panel's keys — why it is not qs.Ui's is at its top
+SearchField.qml                   the box that appears with the first keystroke
 DenseView.qml  ColumnsView.qml    two arrangements of the same sections
 *Section.qml                      Sites · Services · Environment · Attention · Extras
 Section.qml  InfoRow.qml  SiteRow.qml  ServiceRow.qml  StatusDot.qml  CollapseRow.qml

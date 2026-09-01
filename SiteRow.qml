@@ -26,6 +26,9 @@ Item {
 
   property var site: ({})
   property var summary: ({})
+  // Which runs of the domain matched the live search, as [start, length] pairs.
+  // Empty is the normal state and the only one that draws plain text.
+  property var spans: []
   property color foreground: Color.foreground
   property string fontFamily: Style.font.family
   property real fontSize: Style.font.bodySmall
@@ -96,9 +99,19 @@ Item {
     anchors.right: trailing.left
     anchors.rightMargin: Style.space(8)
     anchors.verticalCenter: parent.verticalCenter
-    text: root.site.domain || ""
-    textFormat: Text.PlainText
-    elide: Text.ElideMiddle
+    // Marked-up only while something is matched. Model.highlightHtml escapes
+    // the text it wraps — the domain is data, and this is the one place in the
+    // panel where data becomes markup.
+    text: root.spans.length
+      ? Model.highlightHtml(root.site.domain || "", root.spans, String(Color.accent))
+      : (root.site.domain || "")
+    textFormat: root.spans.length ? Text.StyledText : Text.PlainText
+    // ElideMiddle keeps the TLD visible, which is what tells .test from .lab
+    // apart — but Qt only elides styled text from the right, so a highlighted
+    // row that has to elide loses the end rather than the middle. Matching rows
+    // are few and the panel is sized for the longest domain, so this is a
+    // corner, not a compromise.
+    elide: root.spans.length ? Text.ElideRight : Text.ElideMiddle
     // The domain is the link, so the domain is what underlines — not the row.
     // It stops underlining once the pointer is over an action button, which is
     // correct: clicking there no longer opens the site.

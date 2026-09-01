@@ -9,6 +9,8 @@ Item {
   id: root
 
   property var service: ({})
+  // Matched runs of the display name — see SiteRow.
+  property var spans: []
   property color foreground: Color.foreground
   property string fontFamily: Style.font.family
   property real fontSize: Style.font.bodySmall
@@ -42,8 +44,10 @@ Item {
     anchors.right: detailText.left
     anchors.rightMargin: Style.space(8)
     anchors.verticalCenter: parent.verticalCenter
-    text: root.service.display || root.service.name || ""
-    textFormat: Text.PlainText
+    text: root.spans.length
+      ? Model.highlightHtml(root.service.display || root.service.name || "", root.spans, String(Color.accent))
+      : (root.service.display || root.service.name || "")
+    textFormat: root.spans.length ? Text.StyledText : Text.PlainText
     elide: Text.ElideRight
     color: root.foreground
     opacity: root.service.up ? 1.0 : 0.6

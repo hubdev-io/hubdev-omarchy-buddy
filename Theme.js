@@ -68,7 +68,9 @@ var ICONS = {
   // shows up on someone else's screen.
   "terminal": "",   // nf-fa-terminal
   "folder": "",     // nf-fa-folder_open
-  "code": ""       // nf-fa-code
+  "code": "",       // nf-fa-code
+  // Type-to-filter. Same range, checked the same way.
+  "search": ""      // nf-fa-search
 };
 
 function icon(name) {

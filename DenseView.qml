@@ -7,6 +7,7 @@ Column {
   id: root
 
   property var summary: ({})
+  property var search: ({ active: false, sites: [], services: [] })
   property color foreground: Color.foreground
   property string fontFamily: Style.font.family
   property var panel: null
@@ -15,18 +16,21 @@ Column {
 
   AttentionSection {
     summary: root.summary
+    searching: root.search.active === true
     foreground: root.foreground
     fontFamily: root.fontFamily
   }
 
   EnvironmentSection {
     summary: root.summary
+    searching: root.search.active === true
     foreground: root.foreground
     fontFamily: root.fontFamily
   }
 
   SitesSection {
     summary: root.summary
+    search: root.search
     foreground: root.foreground
     fontFamily: root.fontFamily
     onSiteActivated: function (site) {
@@ -41,12 +45,14 @@ Column {
 
   ServicesSection {
     summary: root.summary
+    search: root.search
     foreground: root.foreground
     fontFamily: root.fontFamily
   }
 
   ExtrasSection {
     summary: root.summary
+    searching: root.search.active === true
     foreground: root.foreground
     fontFamily: root.fontFamily
   }

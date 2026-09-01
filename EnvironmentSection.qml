@@ -10,11 +10,15 @@ Section {
   id: root
 
   property var summary: ({})
+  // A filter narrows the panel to the two lists that can be searched. This
+  // section is not one of them, so while a query is live it steps out of the
+  // way rather than sitting above three matched rows as unrelated noise.
+  property bool searching: false
 
   readonly property var rows: Model.envRows(root.summary)
 
   title: "Environment"
-  visible: root.rows.length > 0
+  visible: !root.searching && root.rows.length > 0
 
   Repeater {
     model: root.rows

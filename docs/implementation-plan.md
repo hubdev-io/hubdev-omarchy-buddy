@@ -295,6 +295,11 @@ columns (~760px), following lerd's proportions. Empty sections are not drawn.
    Verify against the 15-site fixture before the columns view is called done.)*
 4. **Needs attention** — what is actually wrong, in plain words. Nothing when nothing is.
 5. **Tunnels / Backups** — one line each, drawn only when non-empty.
+6. **Type-to-filter** *(added 2026-09-01, Phase 4b)* — any printable key narrows Sites and
+   Services to what matches, marking the matched characters. The panel owns the keyboard the
+   moment it opens, so this needs no field and no shortcut. It is the answer to the same
+   pressure that produced the collapsed-parked-sites rule above: 15 sites is few enough to
+   read and too many to scan mid-thought.
 
 ### 5.3 Actions
 
@@ -775,6 +780,85 @@ moment the pointer reached them — the buttons would vanish under the cursor re
 row rendered and its tooltip shown on screen; and all three argvs run from a detached shell —
 kitty opened in the project directory, Nautilus opened on the same folder, and
 `org.omarchy.nvim` opened the project.
+
+#### Phase 4b — type-to-filter ✅ 2026-09-01
+
+Not in the original scope, and it should have been. §5.2 sized the panel for 15 sites and
+solved it by *collapsing* the parked ones behind a count — which is the right default and the
+wrong answer to "where is that one project". The panel already holds the keyboard when it
+opens, so the cheapest possible find is to start typing: no field to click, no shortcut, and
+nothing on screen at all until the first character.
+
+**Matching is a BOUNDED subsequence, and the bound is the feature.** `cpa` finds
+`clinic-portal-app.test` the way a launcher would. The first version was an unbounded
+subsequence and it was wrong in the panel within a minute of the first real use: a
+three-letter query returned a second row whose only claim was those letters strewn across
+it — `s(onata.cr)a(f)t` for "saf". True, and nobody meant it.
+
+The rule that fixes it: **the first character may land anywhere; every one after it must
+either continue a run or begin a word** (a word starts at `-`, `.`, `_` or `/`, the seams
+HubDev's own labels are built from). The first character stays free because "dev" has to find
+`hubdev.test`. Every occurrence of that first character is tried as an anchor and the best
+alignment wins — leftmost-greedy would commit to the wrong `a` in `clinic-portal-app` and
+report no match for a query that plainly matches, which is the kind of failure that cannot be
+explained to the person typing.
+
+Ranking then orders what survives: a run scores +8/char, a word start +10, an earlier anchor
+beats a later one, and a serving site beats a parked one on a tie. All of it is in `Model.js`
+under `node --test`; a `.qml` could not hold a ranking rule.
+
+**Both lists are searched, and the parked ones with them.** Finding a parked site is the
+feature's best moment — the collapsed row is precisely what was hiding it — so a live query
+flattens the serving/parked split entirely. The sections that cannot be searched (Attention,
+Environment, Extras) step out of the way rather than sitting above three matched rows as
+unrelated noise. Zero matches hides the sections and says so once, at the top, rather than
+once per empty heading.
+
+**The bare-letter shortcuts had to move.** `v` and `r` are now `Alt+V` and `Alt+R`. A panel
+that filters on `v` cannot also toggle its layout on it, and this machine has sites starting
+with both letters.
+
+**`qs.Ui`'s `PanelKeyCatcher` cannot do this**, which is why `KeyCatcher.qml` is the one file
+here that duplicates something the shell ships. The shared catcher spends the unmodified
+letters on vim navigation — `h`/`j`/`k`/`l` move a cursor and `x` deletes — and only forwards
+what is left to `textKey`. That is right for a panel with a row cursor, and it means four of
+the letters in `hubdev.test` never arrive. There is no configuration of it that yields both,
+and this panel never implemented the row cursor those keys drive. The local one keeps
+`Keys.BeforeItem`, Escape, Tab and the `blocked` seam, and decides nothing — a key becomes a
+signal, and what a signal means is `Panel.qml`'s business, including whether Escape clears
+the query or closes the panel.
+
+**Not a `TextField`.** The box is a readout of a string the panel holds. A real input would
+mean juggling active focus against the key router — the shared catcher's own docs prescribe
+`blocked: editor.activeFocus` for exactly that — to buy a cursor and a paste target that a
+15-row filter does not need. `Backspace`, `Ctrl+U` and `Ctrl+W` are handled in one place
+instead.
+
+**The highlight is markup built out of a domain**, which makes `Model.highlightHtml` the one
+place in this plugin where data becomes markup, and escaping a correctness rule rather than a
+nicety. Everything outside a matched run is escaped, the spans are bounds-checked against the
+text they claim to index, and the colour is only allowed through if it is a hex literal — the
+row label is `Text.StyledText` while a match is live. A match found in the *fallback* haystack
+(the site's `name`, for a site linked to an unrelated domain) deliberately carries **no**
+spans: inventing a highlight over text that did not match is worse than showing none.
+
+**Verified:** 129 tests over 10 fixtures, including the escaping and the colour-literal rule;
+`omarchy plugin validate` and `qmllint` clean; and the panel rendered on screen with a seeded
+query — the box, the count (`7 of 23`), `Sites 6/15`, `Services 1/8`, and the unsearchable
+sections gone. Two bugs were found this way and fixed, both invisible to the test suite:
+
+- **A binding loop** — the caret cannot be anchored to the text whose width is anchored back
+  to it. Qt resolves it by putting the caret at the far left and saying so in a log nobody
+  reads.
+- **`Array.isArray` is false across the QML boundary.** The spans are computed in `Model.js`,
+  held in a `property var` on the row, and handed back in to be rendered; that round trip
+  turns a real JS Array into a `QVariantList` wrapper which indexes and has `.length` but is
+  not an Array. Under `node --test` both sides are real arrays, so every span assertion passed
+  while every label on screen drew plain — the feature was *silently* half-shipped. **Anything
+  crossing back out of QML has to be duck-typed**, and the regression test now uses a
+  deliberately non-Array stand-in. This is the second time the "pure JS, tested under node"
+  discipline has been shown to have exactly one blind spot, and it is always this one: the
+  boundary itself.
 
 ### Phase 5 — Publish `v1.0`
 

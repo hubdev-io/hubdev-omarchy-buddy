@@ -8,12 +8,16 @@ Section {
   id: root
 
   property var summary: ({})
+  // A filter narrows the panel to the two lists that can be searched. This
+  // section is not one of them, so while a query is live it steps out of the
+  // way rather than sitting above three matched rows as unrelated noise.
+  property bool searching: false
 
   readonly property bool hasTunnels: root.summary.tunnels && root.summary.tunnels.length > 0
   readonly property bool hasBackups: root.summary.backups && root.summary.backups.count > 0
 
   title: "Also"
-  visible: root.hasTunnels || root.hasBackups
+  visible: !root.searching && (root.hasTunnels || root.hasBackups)
 
   Repeater {
     model: root.hasTunnels ? root.summary.tunnels : []

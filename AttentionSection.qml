@@ -8,10 +8,14 @@ Section {
   id: root
 
   property var summary: ({})
+  // A filter narrows the panel to the two lists that can be searched. This
+  // section is not one of them, so while a query is live it steps out of the
+  // way rather than sitting above three matched rows as unrelated noise.
+  property bool searching: false
 
   title: "Needs attention"
   count: root.summary.issues && root.summary.issues.length > 1 ? String(root.summary.issues.length) : ""
-  visible: root.summary.issues && root.summary.issues.length > 0
+  visible: !root.searching && root.summary.issues && root.summary.issues.length > 0
 
   Repeater {
     model: root.summary.issues || []

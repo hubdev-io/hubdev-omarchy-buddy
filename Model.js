@@ -432,6 +432,258 @@ function serviceGroups(s) {
   return { installed: installed, available: available, availableCount: available.length };
 }
 
+// -------------------------------------------------------------- search ----
+//
+// Type-to-filter. The panel opens with keyboard focus already, so the cheapest
+// possible "find it" is to start typing: no field to click into, no shortcut to
+// remember, and nothing on screen at all until the first character arrives.
+//
+// The matcher is a SUBSEQUENCE match, not a substring one — "cpa" finds
+// "clinic-portal-app.test" the way a launcher would. That is the whole reason
+// to do this in a panel that already shows every site: fifteen rows is few
+// enough to read and too many to scan mid-thought.
+//
+// Ranking, not just filtering, is the part worth testing. Scattered matches are
+// legal but should never outrank the obvious one: typing "hub" must put
+// "hubdev.test" first even though the letters also appear, spread out, in
+// something else. Hence the bonuses below — contiguity and word starts are what
+// make a match feel intentional.
+
+// Whitespace is dropped from the query rather than matched. A space is never
+// part of a domain or a service name, so a typed one can only ever be a slip,
+// and treating it literally would silently empty the list.
+function foldQuery(q) {
+  return (typeof q === "string" ? q : "").replace(/\s+/g, "").toLowerCase();
+}
+
+// Where a "word" begins inside a domain or a service name. `-` and `.` are what
+// HubDev's own labels are built from (`clinic-portal-app.test`), so a match at
+// one of those seams is the user aiming at a part of the name.
+var WORD_BREAK = /[-._/ ]/;
+
+// Where a run of the query is ALLOWED to continue. This is the rule that keeps
+// a subsequence matcher from being useless.
+//
+// A plain subsequence match will find "saf" inside "sonata.craft" —
+// s(onata.cr)a(f)t — which is true, and is not what anybody meant. So after
+// the first character, every next one must either sit immediately after the
+// last (a run) or begin a word. Nothing else counts. That single rule is the
+// difference between a filter and a list of coincidences.
+//
+// The FIRST character is exempt: it may land anywhere. "dev" has to find
+// "hubdev.test", and requiring a word start there would mean only ever matching
+// from the front of a name or a segment.
+function isWordStart(text, i) {
+  return i === 0 || WORD_BREAK.test(text.charAt(i - 1));
+}
+
+// One alignment, anchored at `start`. null when the rule above cannot be
+// satisfied from there.
+function alignFrom(text, lower, q, start) {
+  var spans = [[start, 1]];
+  var score = 1;
+  if (isWordStart(text, start))
+    score += 10;                        // began at a seam: aimed, not accidental
+  score -= start * 0.5;                 // earlier in the name is better
+  var prev = start;
+
+  for (var i = 1; i < q.length; i++) {
+    var c = q.charAt(i);
+
+    if (lower.charAt(prev + 1) === c) {
+      spans[spans.length - 1][1] += 1;
+      score += 9;                       // 1, plus 8 for continuing a real word
+      prev = prev + 1;
+      continue;
+    }
+
+    var at = -1;
+    for (var j = prev + 1; j < lower.length; j++) {
+      if (lower.charAt(j) === c && isWordStart(text, j)) {
+        at = j;
+        break;
+      }
+    }
+    if (at < 0)
+      return null;
+
+    spans.push([at, 1]);
+    score += 11 - 3;                    // 1, plus 10 for a word start, less the
+    prev = at;                          // cost of opening another run
+  }
+
+  return { score: score, spans: spans };
+}
+
+// null, or { score, spans } where spans are [start, length] runs into `text`.
+//
+// Every occurrence of the first query character is tried as an anchor and the
+// best-scoring alignment wins. A single greedy pass would be O(n) instead, but
+// it can also fail on a query that does match: leftmost-first commits to the
+// first `a` in "clinic-portal-app" and then cannot satisfy the word-start rule,
+// even though anchoring one segment later works. At these sizes — a query of a
+// few characters against a domain of a few dozen — exhaustive is free, and it
+// removes a class of "why did that not match" that would be impossible to
+// explain to the person typing.
+function fuzzyMatch(text, query) {
+  var t = typeof text === "string" ? text : "";
+  var q = foldQuery(query);
+  if (!t || !q)
+    return null;
+
+  var lower = t.toLowerCase();
+  var first = q.charAt(0);
+  var best = null;
+
+  for (var s = 0; s < lower.length; s++) {
+    if (lower.charAt(s) !== first)
+      continue;
+    var m = alignFrom(t, lower, q, s);
+    if (m && (!best || m.score > best.score))
+      best = m;
+  }
+
+  return best;
+}
+
+// A row matches on the text the panel actually draws, and falls back to the
+// text it does not.
+//
+// Highlighting is only honest when it marks the string on screen, so a match
+// found in the fallback carries NO spans — the row appears, nothing lights up,
+// and that is the correct signal. HubDev builds a domain as name + TLD, so on
+// an ordinary machine the fallback never fires; it exists for the site linked
+// to a domain that has nothing to do with what the user called it.
+function matchLabel(text, fallback, query) {
+  var m = fuzzyMatch(text, query);
+  if (m)
+    return m;
+  var alt = fuzzyMatch(fallback, query);
+  return alt ? { score: alt.score - 20, spans: [] } : null;
+}
+
+function byRelevance(key) {
+  return function (a, b) {
+    if (a.score !== b.score)
+      return b.score - a.score;
+    if (a.live !== b.live)
+      return a.live ? -1 : 1;
+    return a[key] < b[key] ? -1 : a[key] > b[key] ? 1 : 0;
+  };
+}
+
+// Matches across BOTH site groups — serving and parked. Finding a parked site
+// is the search's best moment: it is the one the collapsed row was hiding.
+function searchSites(s, query) {
+  var out = [];
+  var rows = s && s.sites ? s.sites.rows : [];
+  for (var i = 0; i < rows.length; i++) {
+    var m = matchLabel(rows[i].domain, rows[i].name, query);
+    if (m)
+      out.push({ site: rows[i], spans: m.spans, score: m.score, live: rows[i].active === true, label: rows[i].domain });
+  }
+  out.sort(byRelevance("label"));
+  return out;
+}
+
+function searchServices(s, query) {
+  var out = [];
+  var rows = s && s.services ? s.services.rows : [];
+  for (var i = 0; i < rows.length; i++) {
+    var m = matchLabel(rows[i].display, rows[i].name, query);
+    if (m)
+      out.push({ service: rows[i], spans: m.spans, score: m.score, live: rows[i].up === true, label: rows[i].display });
+  }
+  out.sort(byRelevance("label"));
+  return out;
+}
+
+// Everything the panel needs for one keystroke, computed once and handed down.
+// `active` is the switch the whole UI reads: false restores the normal panel,
+// so clearing the query can never leave a section filtered.
+function searchResults(s, query) {
+  var q = foldQuery(query);
+  if (!q)
+    return { query: "", active: false, sites: [], services: [], total: 0, searched: 0 };
+
+  var sites = searchSites(s, q);
+  var services = searchServices(s, q);
+  var siteTotal = s && s.sites ? s.sites.total : 0;
+  var serviceTotal = s && s.services ? s.services.total : 0;
+  return {
+    query: q,
+    active: true,
+    sites: sites,
+    services: services,
+    total: sites.length + services.length,
+    searched: siteTotal + serviceTotal
+  };
+}
+
+// ---- highlight -----------------------------------------------------------
+
+function escapeHtml(text) {
+  return (typeof text === "string" ? text : "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// A colour is only ever allowed through as a literal. Qt stringifies a colour
+// as #rrggbb or #aarrggbb, and anything else is dropped rather than pasted into
+// markup — the rule costs nothing and means this function cannot be turned into
+// an injection point by a future caller passing something clever.
+var COLOR_RE = /^#[0-9A-Fa-f]{3,8}$/;
+
+// Array-like, checked by duck-typing rather than by `Array.isArray`.
+//
+// This is the one function in the model that receives data back OUT of QML: the
+// spans are computed here, held in a `property var` on the row, and handed in
+// again to be rendered. That round trip turns a real JS Array into a QVariantList
+// wrapper — it indexes, it has `.length`, and `Array.isArray` on it is FALSE.
+// Under `node --test` both sides are real arrays, so the check passed every test
+// and silently rendered every label as plain text on screen. Anything crossing
+// back from QML has to be duck-typed.
+function listLike(v) {
+  return v && typeof v === "object" && typeof v.length === "number" ? v : null;
+}
+
+// The row label as Text.StyledText, with the matched runs marked.
+//
+// This exists here rather than in the .qml for the usual reason and one more:
+// it builds markup out of data. Every non-matching character is escaped, the
+// spans are bounds-checked against the text they claim to index, and both rules
+// are things a test can hold. A .qml string concatenation could not be.
+function highlightHtml(text, spans, color) {
+  var t = typeof text === "string" ? text : "";
+  var runs = listLike(spans);
+  if (!runs || !runs.length)
+    return escapeHtml(t);
+
+  var tint = typeof color === "string" && COLOR_RE.test(color) ? color : "";
+  var out = "";
+  var at = 0;
+
+  for (var i = 0; i < runs.length; i++) {
+    var run = listLike(runs[i]);
+    if (!run || run.length < 2)
+      continue;
+    var start = num(run[0]);
+    var len = num(run[1]);
+    if (len <= 0 || start < at || start + len > t.length)
+      continue;
+
+    out += escapeHtml(t.slice(at, start));
+    var piece = escapeHtml(t.slice(start, start + len));
+    out += tint ? '<b><font color="' + tint + '">' + piece + "</font></b>" : "<b>" + piece + "</b>";
+    at = start + len;
+  }
+
+  return out + escapeHtml(t.slice(at));
+}
+
 function checkById(s, id) {
   var flags = s && s.env ? s.env.flags : [];
   for (var i = 0; i < flags.length; i++) {
