@@ -45,17 +45,27 @@ function timeoutMs(tier) {
   return tier === "cheap" ? 5000 : 15000;
 }
 
+var TOO_OLD = "This HubDev is too old — `snapshot --json` is not available";
+
 // Turn a completed process into a snapshot or a refusal. Never throws — a
 // widget that throws inside the shell process takes the bar with it.
 function parse(stdout, exitCode) {
+  var out = typeof stdout === "string" ? stdout : "";
+
   if (exitCode !== 0) {
     // 127 is the shell's "not found"; Qt reports a failed spawn as -1 or -2.
     if (exitCode === 127 || exitCode < 0)
       return { ok: false, error: "HubDev is not installed" };
+    // A HubDev predating the contract prints "Unknown command: snapshot"
+    // followed by its whole usage screen — on STDOUT — and exits 1.
+    // Verified against v1.28.0. That is the version gate, not a crash, and
+    // reporting it as "exited with code 1" tells the user nothing actionable.
+    if (/unknown command/i.test(out))
+      return { ok: false, error: TOO_OLD };
     return { ok: false, error: "HubDev exited with code " + exitCode };
   }
 
-  var text = typeof stdout === "string" ? stdout.trim() : "";
+  var text = out.trim();
   if (!text)
     return { ok: false, error: "HubDev returned nothing" };
 
@@ -63,9 +73,9 @@ function parse(stdout, exitCode) {
   try {
     doc = JSON.parse(text);
   } catch (e) {
-    // Overwhelmingly means this hubdev predates the contract and printed its
-    // ANSI table instead. Say the useful thing, not "unexpected token <".
-    return { ok: false, error: "This HubDev is too old — `snapshot --json` is not available" };
+    // Exit 0 with non-JSON means a hubdev that accepted the verb but printed
+    // a table instead. Same conclusion, same wording.
+    return { ok: false, error: TOO_OLD };
   }
 
   if (!doc || typeof doc !== "object" || Array.isArray(doc))
