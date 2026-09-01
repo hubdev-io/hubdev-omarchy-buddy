@@ -499,15 +499,53 @@ recorded here so it is not mistaken for a Buddy regression later.
 **Revised sizing:** ~1–2 sessions for the read side — it is wiring, not new logic — plus the
 `Bridge` additions above.
 
-### Phase 2 — Read-only plugin `v0.1`
+### Phase 2 — Read-only plugin `v0.1` ✅ *(complete — 2026-08-31)*
 
-- [ ] `manifest.json`, `BarWidget.qml`, `Source.js`, `Model.js`, `Theme.js`, `Mark.qml`.
-- [ ] Polling: 30s closed / 5s open, coalesced (never two snapshots in flight), suspended
-      when the bar is hidden, exponential backoff to 60s when HubDev is absent.
-- [ ] Dot + tooltip + `unreachable` handling.
-- [ ] `node --test test/*.mjs` green against every fixture.
+- [x] `manifest.json`, `BarWidget.qml`, `Mark.qml`, `SourceJson.js`, `Model.js`, `Theme.js`.
+      *No separate `Source.js`:* the seam is the **import line** in `BarWidget.qml`
+      (`import "SourceJson.js" as Source`), which is exactly the "one-line change" §4 asks
+      for. A dispatcher module in front of it would add indirection without adding a seam.
+- [x] Polling: 30s closed / 5s open, coalesced via `internal.inFlight`, suspended by
+      `poll.running: root.visible`, backoff to 60s. A hard `guard` Timer terminates any
+      Process that overruns its tier timeout.
+- [x] Dot + tooltip + `unreachable` handling — all three levels confirmed on screen.
+- [x] **48** `node --test` assertions green against 10 fixtures.
 
-**Exit criteria:** stop Caddy → the dot turns red within 30s and the tooltip says why.
+**Exit criteria — met.** Verified by feeding the widget each fixture in the live shell and
+reading both the log and the pixels: `caddy-down` → **red dot**, one issue,
+*"Caddy is stopped — no site will resolve"*; `autostart-service-stopped` → **amber dot**,
+*"Redis is set to start automatically but is stopped"*; `healthy` → **no dot at all**
+(zero state-coloured pixels). Caddy itself was not stopped — the fixture drives the identical
+code path deterministically, and stopping it would have taken down 15 live sites.
+
+#### 7.5 What Phase 2 corrected
+
+- **`tools/hubdev-snapshot`** — a reference implementation of the §4.1 contract over
+  `hubdev mcp`, the Caddy admin API and `docker ps`. Not a shipping path (it is §4 approach E,
+  rejected in G8); it exists so Phase 2 could be finished before Phase 1, and so the Go work
+  has an executable acceptance target. Its live output reduces through the real `Model.js` to
+  `level: ok`, `Sites 14/15 · Services 5/8 · PHP 8.4 (default) · Caddy 2.11.4`.
+- **The version gate was broken, and only the live shell showed it.** `hubdev snapshot --json`
+  on v1.28.0 prints `Unknown command: snapshot` plus its entire usage screen **to stdout** and
+  **exits 1**. `parse()` only reached its "too old" branch on exit 0 with non-JSON output, so
+  the real case fell through to *"HubDev exited with code 1"* — true, and useless in a tooltip.
+  Every fixture had been exercising the exit-0 path. Fixed, with the real v1.28.0 output as a
+  regression test.
+- **Three rules the live data forced into `Model.js`**, each now a named test: an *uninstalled*
+  service with `auto_start: true` must not warn (`reverb` ships exactly that, and would have
+  warned forever about something never set up); a stopped Caddy reports **once**, not once per
+  site (otherwise `all-stopped` emits fifteen identical issues); and an absent `route_present`
+  means *unknown*, not missing, so a v1 contract without the PROPOSED fields still renders
+  truthfully.
+- **The mark is not monochrome.** The placeholder Nerd Font glyph resolves to a colour font, so
+  `color: root.foreground` is ignored and it renders two-tone regardless of theme. Harmless
+  now, but §5.1's "monochrome, taking the bar foreground" is not satisfied until the Phase 5
+  mark asset lands. **Track it there.**
+- **G7 is only half closed.** `Theme.js` defines a distinct glyph per level so colour is never
+  the sole carrier, but `Mark.qml` draws a plain coloured `Rectangle` and uses motion (a pulse
+  on `down`) as the second channel. In a still frame `warn` and `down` differ by hue alone —
+  which is precisely the failure G7 predicted on an amber-foreground theme. Either use
+  `Theme.glyphFor()` in the dot or give `warn` a distinct shape.
 
 ### Phase 3 — Panel `v0.2`
 
@@ -567,6 +605,15 @@ loop**, not a workaround. `rsync` on save is the fallback. Saved QML reloads aut
 Run `omarchy plugin validate ~/.config/omarchy/plugins/io.hubdev.buddy` before every commit
 that touches `manifest.json` — it mirrors the checks in `shell/services/PluginRegistry.qml`,
 so it refuses exactly what the running shell would refuse.
+
+> **Correction (Phase 2).** "Saved QML reloads automatically" is **wrong for `bar-widget`s**,
+> and it cost most of a session. The shell logs `Local plugin changed, reloading: <id>` on
+> every save, but the already-instantiated widget keeps running the code it was built with:
+> edits produced no effect, `console.log` never fired, and a deliberate syntax error was
+> loaded without complaint — while the shell went on reporting an `IpcHandler` warning at the
+> *pre-edit* line number, which is what finally gave it away. **`omarchy-restart-shell` after
+> every QML edit** is the actual dev loop. The line number in a QML warning is the cheapest
+> way to tell which version is really running.
 
 ---
 

@@ -3,13 +3,18 @@
 > The state of your [HubDev](https://hubdev.io) environment at a glance in the Omarchy
 > Quattro bar. Sites, services, PHP versions, Caddy and Docker — without raising the GUI.
 
-**Status: Phase 0 complete. No shipping code in this repository yet — but the platform is
-proven, not assumed.**
+**Status: Phases 0 and 2 complete. The widget runs in the bar today.**
 
-Omarchy **Quattro 4.0.2-1** (Quickshell 0.3.1) runs on the development machine, and the
-readiness spike has been *run*: a throwaway third-party plugin drives `Quickshell.Io.Process`
-against the `hubdev` CLI and renders the live site count in the bar. That closes the one
-unknown that could have halved the project. Phase 2 — the read-only widget — is next.
+Omarchy **Quattro 4.0.2-1** (Quickshell 0.3.1). `io.hubdev.buddy` is installed and rendering:
+a mark that stays quiet when the environment is healthy, gains an **amber dot** when something
+needs attention, and a **red dot** when nothing will serve. All three states are verified on
+screen, and the QML-free logic has 48 tests over 10 fixtures exported from live `hubdev mcp`
+output.
+
+**Phase 1 has not shipped**, so against a stock HubDev the widget correctly reports
+*"This HubDev is too old — `snapshot --json` is not available"*. `tools/hubdev-snapshot`
+implements that contract over `hubdev mcp` for development, and is the acceptance target for
+the Go work.
 
 ## What is here
 
@@ -53,16 +58,23 @@ plan: `hubdev service:list` costs **568 ms** with containers running (6.5× the 
 which moved it out of the cheap polling tier; and `site:fix` was cut from the action allowlist
 because it can raise a polkit dialog that blocks the shell's `Process`. Plan §7.1–§7.3.
 
-## Planned layout
+## Layout
 
 ```
 manifest.json                     io.hubdev.buddy, schemaVersion 1
 BarWidget.qml                     the only file that does I/O
-Panel.qml  DenseView.qml  ColumnsView.qml
-Source.js  SourceJson.js          the transport seam
-Model.js  Actions.js  Theme.js    pure JS, QML-free, tested under node
-test/                             node --test + fixtures
+Mark.qml                          the glyph and its state dot
+SourceJson.js                     the transport seam (the import line is the seam)
+Model.js  Theme.js                pure JS, QML-free, tested under node
+test/                             node --test, harness + 10 fixtures
+tools/hubdev-snapshot             dev-only reference implementation of the contract
+                                  ── still to come ──
+Panel.qml  DenseView.qml  ColumnsView.qml     Phase 3
+Actions.js                                    Phase 4
 ```
+
+`test/harness.mjs` loads the real `.js` files into node, stripping only QML's `.pragma`
+directive, so the tests run exactly what the shell loads and there is no second copy to drift.
 
 ## Reading the plan
 
