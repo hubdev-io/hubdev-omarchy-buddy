@@ -57,24 +57,38 @@ BarWidget {
       panelLoader.item.toggle();
   }
 
-  // Open a URL in whatever the desktop calls its browser. The one write this
-  // widget performs, and it is deliberately the cheapest possible shape:
+  // The one write this widget performs, and it is deliberately the cheapest
+  // possible shape:
   //
-  //  - `omarchy-launch-browser` resolves the default through xdg-settings, so
-  //    "my browser" means what it means everywhere else on this desktop.
   //  - `Util.execArgv` hands bash a fixed argv as positional parameters, which
-  //    are expanded without re-tokenising — a domain can never become a
-  //    command, whatever HubDev's config contains (plan §6, R6).
-  //  - It is detached. Nothing in the shell waits on a browser, so there is no
-  //    Process to time out and nothing to hang the bar. The `snapshotProc`
-  //    guard timer exists precisely because reads are *not* detached; this is
-  //    the other half of that rule, not an exception to it.
+  //    are expanded without re-tokenising — a domain or a site name can never
+  //    become a command, whatever HubDev's config contains (plan §6, R6).
+  //  - It is detached. Nothing in the shell waits on a browser, a terminal or
+  //    an editor, so there is no Process to time out and nothing to hang the
+  //    bar. The `snapshotProc` guard timer exists precisely because reads are
+  //    *not* detached; this is the other half of that rule, not an exception.
   //
-  // The URL is built and validated by Model.siteUrl, which node tests.
+  // Which is exactly why only these verbs go through here. Anything whose
+  // output or exit code matters needs a Process and a guard timer, and calling
+  // it "detached" would just mean losing the failure.
+  //
+  // The argv itself is always built and validated somewhere node can test it —
+  // Model.siteUrl for the URL, Actions.siteArgv for the row actions. This
+  // function checks that it was handed something, and nothing more.
+  function runDetached(argv) {
+    if (!argv || !argv.length)
+      return;
+    Util.execArgv(argv);
+  }
+
+  // Open a URL in whatever the desktop calls its browser. `omarchy-launch-browser`
+  // resolves the default through xdg-settings, so "my browser" means what it
+  // means everywhere else on this desktop — the same reasoning that lets the
+  // row actions defer to $TERMINAL, xdg-open and `hubdev editor:use`.
   function openUrl(url) {
     if (!url)
       return;
-    Util.execArgv(["omarchy-launch-browser", url]);
+    root.runDetached(["omarchy-launch-browser", url]);
   }
 
   function closeForPopoutSwitch() {

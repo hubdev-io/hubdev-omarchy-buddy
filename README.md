@@ -3,16 +3,28 @@
 > The state of your [HubDev](https://hubdev.io) environment at a glance in the Omarchy
 > Quattro bar. Sites, services, PHP versions, Caddy and Docker — without raising the GUI.
 
-**Status: Phases 0–3 complete. The widget runs in the bar, the contract it reads exists, and
-clicking it opens the panel.**
+**Status: Phases 0–3 complete, the first three actions ship, and the panel filters as you
+type. The widget runs in the bar, the contract it reads exists, clicking it opens the panel,
+and a site row hands you the project.**
 
 Omarchy **Quattro 4.0.2-1** (Quickshell 0.3.1). `io.hubdev.buddy` is installed and rendering:
 a mark that stays quiet when the environment is healthy, gains an **amber dot** when something
 needs attention, and a **red dot** when nothing will serve. Clicking it opens a panel with
 Sites, Services and Environment — and *Needs attention* only when there is something to say —
 in either a dense list or three columns, toggled with `v` and remembered across restarts.
-Clicking a site opens it in the desktop's browser. All three states are verified on screen,
-and the QML-free logic has 78 tests over 10 fixtures.
+Clicking a site opens it in the desktop's browser; hovering one reveals three more, in place
+of the PHP version they cover — **a terminal in the project, the project in the file manager,
+the project in the editor**. All three states are verified on screen, and the QML-free logic
+has 99 tests over 10 fixtures.
+
+Each of those three is a HubDev verb (`site:terminal`, `folder`, `edit`), and each resolves
+*your* default rather than naming a program: the terminal from `$TERMINAL`, the file manager
+from `xdg-open`, the editor from `omarchy-launch-editor` — the same reasoning that makes the
+browser action `omarchy-launch-browser`. They are the three that need no machinery: detached,
+no output anyone reads, nothing destructive, no chance of a sudo prompt. `Actions.js` holds
+the allowlist and the argv, and node tests it — including the refusals, because `hubdev`
+parses its own flags out of the argv it is handed and a site named `--print` must never
+become one.
 
 **`hubdev snapshot --json` is implemented** in HubDev's own CLI, and the widget's
 `SourceJson.parse()` → `Model.summarize()` reduces its live output to `level: ok`,
@@ -85,11 +97,13 @@ Panel.qml                         the popout: header, view, hand-offs
 DenseView.qml  ColumnsView.qml    two arrangements of the same sections
 *Section.qml                      Sites · Services · Environment · Attention · Extras
 Section.qml  InfoRow.qml  SiteRow.qml  ServiceRow.qml  StatusDot.qml  CollapseRow.qml
+Actions.js                        the argv allowlist: what a click is allowed to run
 test/                             node --test, harness + 10 fixtures
 tools/hubdev-snapshot             dev-only reference implementation of the contract,
                                   written before the Go one and kept as its acceptance target
                                   ── still to come ──
-Actions.js                                    Phase 4
+(the rest of Phase 4: verbs that need a Process, a guard timer and a confirm gate —
+ service start/stop/restart, caddy, php-fpm — plus actionState and the spinner)
 ```
 
 `test/harness.mjs` loads the real `.js` files into node, stripping only QML's `.pragma`

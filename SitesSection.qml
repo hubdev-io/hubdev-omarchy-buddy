@@ -16,6 +16,7 @@ Section {
   // Raised rather than handled: this file knows how to arrange sites, not how
   // to launch anything. BarWidget.qml is still the only file that does I/O.
   signal siteActivated(var site)
+  signal siteActionRequested(var site, string key)
 
   readonly property var groups: Model.siteGroups(root.summary)
 
@@ -27,9 +28,11 @@ Section {
     model: root.groups.active
     SiteRow {
       site: modelData
+      summary: root.summary
       foreground: root.foreground
       fontFamily: root.fontFamily
       onActivated: root.siteActivated(modelData)
+      onActionRequested: function (key) { root.siteActionRequested(modelData, key); }
     }
   }
 
@@ -46,9 +49,11 @@ Section {
     model: root.expanded ? root.groups.inactive : []
     SiteRow {
       site: modelData
+      summary: root.summary
       foreground: root.foreground
       fontFamily: root.fontFamily
       onActivated: root.siteActivated(modelData)
+      onActionRequested: function (key) { root.siteActionRequested(modelData, key); }
     }
   }
 }

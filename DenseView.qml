@@ -33,6 +33,10 @@ Column {
       if (root.panel)
         root.panel.openSite(site);
     }
+    onSiteActionRequested: function (site, key) {
+      if (root.panel)
+        root.panel.runSiteAction(site, key);
+    }
   }
 
   ServicesSection {

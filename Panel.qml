@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import qs.Commons
 import qs.Ui
+import "Actions.js" as Actions
 import "Model.js" as Model
 import "Theme.js" as Theme
 
@@ -66,6 +67,27 @@ Panel {
       return;
     if (root.hostWidget && typeof root.hostWidget.openUrl === "function")
       root.hostWidget.openUrl(url);
+    root.close();
+  }
+
+  // The three hover actions on a site row: a terminal in the project, the
+  // project in the file manager, the project in the editor.
+  //
+  // The panel decides nothing here either. Actions.js turns (summary, site,
+  // key) into an argv array or into [], and [] means the click is dropped —
+  // an unknown verb, a name that cannot go on a command line, or a site this
+  // snapshot no longer lists. Same shape as openSite: validate in tested JS,
+  // hand a fixed argv to the one file that spawns.
+  //
+  // It closes for the same reason openSite does — a terminal, a file manager
+  // or an editor window is about to take the screen, and a popout left hanging
+  // behind it reads as a click that did not land.
+  function runSiteAction(site, key) {
+    var argv = Actions.siteArgv(root.summary, site, key);
+    if (!argv.length)
+      return;
+    if (root.hostWidget && typeof root.hostWidget.runDetached === "function")
+      root.hostWidget.runDetached(argv);
     root.close();
   }
 

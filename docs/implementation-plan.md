@@ -716,11 +716,65 @@ work from `~/.config/omarchy/plugins`.
 
 ### Phase 4 — Actions `v0.3`
 
-- [ ] `Actions.js` allowlist, argv construction, snapshot validation, confirm-gates.
+- [x] `Actions.js` allowlist, argv construction, snapshot validation. **The three detached
+      site verbs ship (2026-09-01)** — see *Phase 4a* below. Confirm-gates are still to come,
+      and are only needed by the verbs that are still to come.
 - [ ] `run(request)` + `actionState` + spinner + red-icon-with-refusal + 6s self-clear.
 - [ ] Refresh burst; per-action timeout (15s default, 120s for image pulls) with a message
       that names what timed out.
-- [ ] `Actions.js` tests: every row shape → the exact argv, and the refusal cases.
+- [x] `Actions.js` tests: every row shape → the exact argv, and the refusal cases.
+
+#### Phase 4a — the three detached site actions ✅ 2026-09-01
+
+The site row's hover actions, split off from the rest of Phase 4 because they need none of
+its machinery. A terminal in the project, the project in the file manager, the project in the
+editor — all three are detached, produce no output anyone reads, cannot fail destructively
+and cannot escalate. That is the whole reason they could ship without `actionState`, a
+spinner, a guard timer or a confirm gate: there is no exit code to report and nothing to wait
+on. `Util.execArgv` is the primitive, exactly as it already was for `openUrl`.
+
+**HubDev already owned all three.** No CLI work was needed — `site:terminal`, `folder` and
+`edit` are first-class commands, each takes the site as an optional argument, and each calls
+`Start()` rather than `Run()` on its side too. What is new here is only the argv table and
+the plumbing to reach it.
+
+| Key | argv | resolves through |
+|---|---|---|
+| `terminal` | `hubdev site:terminal <site>` | `$TERMINAL` → `x-terminal-emulator` → detection |
+| `folder` | `hubdev folder <site>` | `xdg-open` (Nautilus here) |
+| `editor` | `hubdev edit --ide=omarchy-launch-editor <site>` | `omarchy-launch-editor` |
+
+**`--ide=` on the editor is load-bearing, and cost a decision.** Left alone, `hubdev edit`
+resolves `$EDITOR`, which on Omarchy is `omarchy-launch-editor --inline` — and `--inline`
+means *run the editor in this terminal*, which a bar widget does not have. Verified on this
+machine: the plain form opens no window at all; the override opens `org.omarchy.nvim` every
+time. The override was chosen over the two alternatives (asking the user to run
+`hubdev editor:use omarchy-launch-editor`, or fixing `resolveEditor` in `devhub-go` so an
+`$EDITOR`-sourced editor is never launched detached with its inline args) because it works
+with no setup on any Omarchy machine. **The cost, stated plainly: it ignores
+`hubdev editor:use`.** Deleting the `--ide=` argument is the entire fix if HubDev ever stops
+forwarding an inline `$EDITOR` down its detached launch path.
+
+**The gate is one function.** `Actions.siteArgv(summary, site, key)` returns the argv or `[]`,
+and `[]` means nothing is spawned. It refuses an unknown verb, a site the *current* snapshot
+does not list (the stale-panel case, after an unlink), and any reference that is not a plain
+label. That last rule is not about shell injection — `Util.execArgv` makes that impossible —
+but about `hubdev` parsing its **own** flags out of the argv it is handed: a site named
+`--print` or `-q` would be read as one, so a reference must begin with an alphanumeric. The
+same rule rejects `../../etc` and `~/secrets`, which matters because `hubdev folder <arg>`
+falls back to treating an unmatched argument as a path.
+
+**Layout.** The actions appear in place of the PHP version they cover (lerd's rule, §5.3).
+The trailing block reserves the width of the *wider* of its two states, so a row never
+changes height or reflows on hover — with 15 sites, a list that jumps under the pointer would
+be worse than no actions. Hover is read by a `HoverHandler` on the row rather than the row's
+`MouseArea`, because the buttons sit on top of that `MouseArea` and would take its hover the
+moment the pointer reached them — the buttons would vanish under the cursor reaching for them.
+
+**Verified:** 99 tests over 10 fixtures; `omarchy plugin validate` and `qmllint` clean; the
+row rendered and its tooltip shown on screen; and all three argvs run from a detached shell —
+kitty opened in the project directory, Nautilus opened on the same folder, and
+`org.omarchy.nvim` opened the project.
 
 ### Phase 5 — Publish `v1.0`
 

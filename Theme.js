@@ -61,7 +61,14 @@ var ICONS = {
   "caret-down": "",
   "caret-right": "",
   "spinner": "",
-  "lock": ""
+  "lock": "",
+  // Site row actions. Font Awesome range, same as everything above it — these
+  // three were checked against this machine's JetBrainsMono Nerd Font cmap
+  // rather than a cheatsheet, because a missing glyph is a tofu box that only
+  // shows up on someone else's screen.
+  "terminal": "",   // nf-fa-terminal
+  "folder": "",     // nf-fa-folder_open
+  "code": ""       // nf-fa-code
 };
 
 function icon(name) {
