@@ -156,8 +156,7 @@
       "php_version": "8.4",
       "mode": "traditional",
       "active": true,
-      "tls": true,
-      "route_present": false
+      "tls": true
     },
     {
       "name": "beacon",
@@ -167,8 +166,7 @@
       "php_version": "8.4",
       "mode": "traditional",
       "active": true,
-      "tls": true,
-      "route_present": false
+      "tls": true
     },
     {
       "name": "ledger",
@@ -178,8 +176,7 @@
       "php_version": "8.4",
       "mode": "traditional",
       "active": true,
-      "tls": true,
-      "route_present": false
+      "tls": true
     },
     {
       "name": "orchard",
@@ -189,8 +186,7 @@
       "php_version": "8.4",
       "mode": "traditional",
       "active": true,
-      "tls": true,
-      "route_present": false
+      "tls": true
     },
     {
       "name": "invoice-app",
@@ -200,8 +196,7 @@
       "php_version": "8.4",
       "mode": "traditional",
       "active": false,
-      "tls": true,
-      "route_present": false
+      "tls": true
     },
     {
       "name": "clinic-portal-app",
@@ -211,8 +206,7 @@
       "php_version": "8.4",
       "mode": "traditional",
       "active": true,
-      "tls": true,
-      "route_present": false
+      "tls": true
     },
     {
       "name": "wallet-app",
@@ -222,8 +216,7 @@
       "php_version": "8.4",
       "mode": "traditional",
       "active": true,
-      "tls": true,
-      "route_present": false
+      "tls": true
     },
     {
       "name": "dispatch",
@@ -233,8 +226,7 @@
       "php_version": "8.4",
       "mode": "traditional",
       "active": true,
-      "tls": true,
-      "route_present": false
+      "tls": true
     },
     {
       "name": "hydrant",
@@ -244,8 +236,7 @@
       "php_version": "8.4",
       "mode": "traditional",
       "active": true,
-      "tls": true,
-      "route_present": false
+      "tls": true
     },
     {
       "name": "museum-wp",
@@ -255,8 +246,7 @@
       "php_version": "8.4",
       "mode": "traditional",
       "active": true,
-      "tls": true,
-      "route_present": false
+      "tls": true
     },
     {
       "name": "clinic",
@@ -266,8 +256,7 @@
       "php_version": "8.4",
       "mode": "traditional",
       "active": true,
-      "tls": true,
-      "route_present": false
+      "tls": true
     },
     {
       "name": "summit",
@@ -277,8 +266,7 @@
       "php_version": "8.4",
       "mode": "traditional",
       "active": true,
-      "tls": true,
-      "route_present": false
+      "tls": true
     },
     {
       "name": "harbor-pin",
@@ -288,8 +276,7 @@
       "php_version": "8.4",
       "mode": "traditional",
       "active": true,
-      "tls": true,
-      "route_present": false
+      "tls": true
     },
     {
       "name": "hubdev",
@@ -299,8 +286,7 @@
       "php_version": "8.4",
       "mode": "traditional",
       "active": true,
-      "tls": true,
-      "route_present": false
+      "tls": true
     },
     {
       "name": "terminal-radio",
@@ -310,8 +296,7 @@
       "php_version": "8.4",
       "mode": "traditional",
       "active": true,
-      "tls": true,
-      "route_present": false
+      "tls": true
     }
   ],
   "health": {

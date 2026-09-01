@@ -1,13 +1,16 @@
 # HubDev Buddy — Omarchy Quattro plugin
 
-**Implementation plan** · 2026-08-31 · **revised 2026-08-31, post-upgrade** ·
-**Phase 0 complete 2026-08-31**
-Status: **Phase 0 done, Phase 2 is next.** Omarchy Quattro is running here, and the readiness
-spike has been *run*, not reasoned about: a third-party plugin at
-`~/.config/omarchy/plugins/io.hubdev.spike/` drives `Quickshell.Io.Process` against the
-`hubdev` CLI and renders the live site count in the bar. R1 is closed, R2 is re-measured under
-load (and forced a tiering revision, §7.2), and R3 turned out to be a *different* risk than
-the one written down (§7.1). Nothing is waiting on the platform.
+**Implementation plan** · 2026-08-31 · **revised 2026-09-01** ·
+**Phases 0–3 complete 2026-09-01**
+Status: **Phases 0, 1, 2 and 3 done. Phase 4 (actions) is next.** The two halves met and the
+panel is on screen: `hubdev snapshot --json` exists in `devhub-go`, the widget reduces its
+live output to `level: ok`, `Sites 14/15 · Services 5/8`, and clicking the mark opens a panel
+with Sites, Services, Environment and — only when there is something to say — Needs
+attention, in either a dense list or three columns. R1 is closed, R2 is re-measured under load
+(and forced a tiering revision, §7.2), R3 turned out to be a *different* risk than the one
+written down (§7.1), and R4 — the contract landing late — is moot: **v1.29.0 is built and
+installed locally** (`/usr/local/bin/hubdev`, shadowing the pacman v1.28.0), so the widget is
+reading the real contract.
 
 Reference implementation: `lerd Glance` (`~/Projects/Research/lerd-omarchy-glance`)
 HubDev CLI source: `~/Projects/HubDev/devhub-go` (Go 1.25, Wails + Svelte GUI)
@@ -186,7 +189,15 @@ Both live behind a **source adapter seam**: `Source.js` exposes one function,
 `snapshot(cb)`, returning the canonical shape from §6. Swapping `SourceJson` ↔ `SourceFiles`
 ↔ (later) `SourceHttp` changes one line in `BarWidget.qml` and nothing in `Model.js`.
 
-### 4.1 The CLI contract to add to HubDev
+### 4.1 The CLI contract to add to HubDev ✅ *(shipped — `devhub-go`, Phase 1)*
+
+> **As built.** The envelope below is what `hubdev snapshot --json` emits, with three
+> corrections recorded in **§7.6**: the TTL cache is *withdrawn* (a cache inside a
+> process-per-call CLI is written and discarded in the same breath), `update_available` is
+> read from the updater's on-disk cache so the verb never touches the network, and
+> `tls_expires_in_days` did not ship because nothing in HubDev computes it yet.
+> Implementation: `devhub-go/cli_snapshot.go`; reference docs: `devhub-go/docs/12-cli.md`
+> → Snapshot.
 
 One aggregate call, not seven. lerd fans out to 7 endpoints because HTTP round-trips are
 cheap; process spawns are not.
@@ -198,14 +209,14 @@ hubdev snapshot --json [--include=sites,services,php,caddy,docker,health,tunnels
 ```jsonc
 {
   "schema": 1,                      // bumped on breaking change; the plugin refuses newer majors
-  "hubdev": { "version": "1.28.0", "update_available": null },                            // update_available: PROPOSED
+  "hubdev": { "version": "1.29.0", "update_available": null },   // update_available: SHIPPED, from the updater's on-disk cache only (§7.6)
   "generated_at": "2026-08-31T22:49:15Z",
   "caddy":    { "running": true, "version": "2.11.4", "mode": "native", "routes": 15 },   // known (caddy:status)
   "php":      [ { "version": "8.4", "default": true, "fpm_running": true, "xdebug": false } ],
-  "docker":   { "available": true, "containers": { "running": 0, "exited": 5 }, "reclaimable_bytes": 0 },
+  "docker":   { "available": true, "containers": { "running": 5, "exited": 0 } },          // reclaimable_bytes: omitted, not 0 — nothing computes it (§7.6)
   "services": [ /* exactly the hubdev_list_services shape, minus `password` */ ],         // known
   "sites":    [ { "name", "domain", "path", "driver", "php_version", "mode", "active",   // known
-                  "tls": true, "route_present": true } ],                                  // PROPOSED
+                  "tls": true, "route_present": true } ],   // SHIPPED — matched against Caddy's live route table; omitted, not false, when Caddy is down
   "health":   { "checks": [ { "id": "dns_test", "level": "ok|warn|error", "label", "detail" } ] },
   "tunnels":  [ { "site", "url", "running" } ],
   "backups":  { "count": 12, "bytes": 0, "last_at": "..." },
@@ -213,17 +224,28 @@ hubdev snapshot --json [--include=sites,services,php,caddy,docker,health,tunnels
 }
 ```
 
-Fields are marked **known** (HubDev already computes and exposes them via `mcp`/`doctor`/
-`caddy:status`) or **PROPOSED** (new work in the Go core). Only the proposed ones carry
-schedule risk; a v1 that drops all of them still works.
+Fields were marked **known** (HubDev already computes and exposes them via `mcp`/`doctor`/
+`caddy:status`) or **PROPOSED** (new work in the Go core). Only the proposed ones carried
+schedule risk; a v1 that dropped all of them still worked. **In the event, the proposed set
+split three ways** — `route_present` shipped as designed, `update_available` shipped with a
+narrower definition, and `tls_expires_in_days` did not ship at all. §7.6 has the reasoning
+for each.
 
 Design rules for the contract:
 
 - **Tiering.** Two tiers, and the *expensive* one never runs at 5s:
-  **cheap** (`caddy,php,services,sites` — config reads and process checks) every 30s closed,
-  every 5s open; **expensive** (`docker,health,backups`) every 30s regardless, and once on
-  panel open. Docker inspection is the expensive part and is opt-in by `--include`.
-- **Server-side TTL cache** (~2s) inside `hubdev` so a burst of calls does not hammer Docker.
+  **cheap** (`caddy,php,sites` — config reads, process checks and one Caddy admin API call)
+  every 30s closed, every 5s open; **expensive** (`services,docker,health,tunnels,backups`)
+  every 30s regardless, and once on panel open. *`services` was in the cheap tier here until
+  §7.2 measured it: it inspects a container per service, so it scales with container count.*
+  **Measured as shipped: cheap 435 ms, full 2,609 ms.**
+- **A section not requested is absent; a section requested and empty is `[]`.** This is what
+  lets a cheap reply be merged over a full one without a section list (§7.6).
+- ~~**Server-side TTL cache** (~2s) inside `hubdev` so a burst of calls does not hammer
+  Docker.~~ **Withdrawn (§7.6).** `hubdev` is a process per invocation, so an in-process
+  cache never survives to be read. A burst is prevented on the caller's side instead — the
+  widget never has two spawns in flight — and a cache belongs in the GUI or a future daemon,
+  which hold their managers open.
 - **Never serialise secrets.** `services.yml` holds plaintext passwords and `license.json`
   holds the key; both are stripped from `snapshot` output. Non-negotiable.
 - **Mutations answer JSON too.** `hubdev service:start redis --json` → `{"ok":true}` or
@@ -362,8 +384,9 @@ are hand-written first from the `hubdev mcp` output that already exists, committ
 both sides converge on them. The plugin can be feature-complete and fully tested before
 `hubdev snapshot --json` exists — which is what makes R4 survivable.
 
-Rough sizing, in focused sessions rather than calendar time: **P0** ~~1~~ **done** · **P1** 1–2 (HubDev
-repo — revised down, see §3.1) · **P2** 2 · **P3** 3–4 · **P4** 2–3 · **P5** 1.
+Rough sizing, in focused sessions rather than calendar time: **P0** ~~1~~ **done** ·
+**P1** ~~1–2~~ **done** (one session; the estimate held) · **P2** ~~2~~ **done** ·
+**P3** 3–4 · **P4** 2–3 · **P5** 1.
 
 ### Phase 0 — Readiness spike ✅ *(complete — 2026-08-31)*
 
@@ -480,24 +503,45 @@ recorded here so it is not mistaken for a Buddy regression later.
       Start from `omarchy.agents`' `activation: "on-demand"` — the manifest key is real and
       documented by example, but what the shell does with it is not yet read.
 
-### Phase 1 — The JSON contract *(HubDev CLI, ships independently)*
+### Phase 1 — The JSON contract ✅ *(complete — 2026-08-31, in `devhub-go`)*
 
-- [x] ~~Clone the CLI repo~~ — done: `devhub-go`. Confirm the build/release loop and pick
-      the target release for the contract.
-- [ ] `cli_snapshot.go`: wire the `app` value the way `cli_mcp.go` does, call the existing
-      `mcp.Bridge` reads, marshal one envelope. **This is the bulk of the read side.**
-- [ ] Add to `Bridge` only what is genuinely missing: Caddy running/version/route count,
-      Docker container counts and reclaimable bytes, backup totals, license plan.
-- [ ] `--include` tiers and a ~2s TTL cache.
+- [x] ~~Clone the CLI repo~~ — done: `devhub-go`, `main`, Go 1.25.5, `wails build -tags webkit2_41`.
+- [x] `cli_snapshot.go` (~430 lines with its reasoning): one `snapshotDoc` envelope, one
+      `buildSnapshot(app, include)`, section by section. **It does not go through
+      `mcp.Bridge`.** The plan assumed it would; `App` already satisfies every read the
+      Bridge exposes, and the Bridge is an import-cycle workaround for `internal/mcp`, not
+      an abstraction the CLI needs. Routing through it would have added an indirection whose
+      only purpose is to be crossed. `cli.go` gets one `case "snapshot"`.
+- [x] ~~Add to `Bridge` only what is genuinely missing~~ — **nothing was missing.**
+      `CaddyStatus` / `CaddyActiveRoutes` / `SvcDockerAvailable` / `DockerListAllContainers` /
+      `BackupTotals` / `platform.LoadLicense` all existed as `App` methods already. The only
+      new code in the whole of HubDev is `updater.CachedLatest` (§7.6) — 12 lines.
+- [x] `--include` tiers. **No TTL cache** — see §7.6; a cache inside a process that lives for
+      one call is worth nothing, and the plan was wrong to ask for one here.
 - [ ] `--json` on the mutation verbs in the allowlist; NDJSON progress for long ones.
-- [ ] Secret stripping, with a test that asserts no password or license key can appear.
-- [ ] `NO_COLOR` / non-TTY honoured across the CLI (a bug worth fixing regardless).
-- [ ] Fixtures: `test/fixtures/*.json` exported from real machines — healthy, all-stopped,
-      docker-down, no-sites, 15-sites.
+      **Deferred to Phase 4**, where the actions that need it are actually built. Nothing in
+      the read path wants it.
+- [x] Secret stripping — structural, not a filter: every section is copied field by field
+      into an explicit output struct, so `provider.ServiceStatus` gaining a `password`
+      tomorrow cannot reach the wire. `TestSnapshotNeverCarriesSecretShapedKeys` fails the
+      build if a secret-shaped key appears. `error` and `web_url` are dropped from `services`
+      for the same reason (raw messages carry paths; service UIs carry credentials).
+- [ ] `NO_COLOR` / non-TTY honoured across the CLI. **Still open, and still worth doing** —
+      but `snapshot` sidesteps it entirely by writing JSON to stdout and every diagnostic to
+      stderr, so it no longer blocks anything here.
+- [x] Fixtures — the 10 in `test/fixtures/` predate this and still pass unchanged, which is
+      the result that mattered: the contract written from `hubdev mcp` output survived
+      contact with the real implementation.
 
-**Exit criteria:** `hubdev snapshot --json | jq` on a fresh machine; fixtures committed here.
-**Revised sizing:** ~1–2 sessions for the read side — it is wiring, not new logic — plus the
-`Bridge` additions above.
+**Exit criteria — met.** `hubdev snapshot --json | jq` runs on this machine; the widget's own
+`SourceJson.parse()` → `Model.summarize()` on that live output gives `level: ok`,
+`Sites 14/15 · Services 5/8 · PHP 8.4 (default) · Caddy 2.11.4`, zero issues. Both tiers were
+driven through the *exact argv `SourceJson.request()` builds*: **cheap 435 ms** (budget
+5,000 ms) and **full 2,609 ms** (budget 15,000 ms). Go: `go vet` clean, **463 tests pass**
+across 39 packages, 9 of them new in `cli_snapshot_test.go`.
+
+**What is left is a release, not code.** `AppVersion` is bumped by CI on push to `main`, so
+the version that carries `snapshot` is v1.29.0 — answering open question §10.1.
 
 ### Phase 2 — Read-only plugin `v0.1` ✅ *(complete — 2026-08-31)*
 
@@ -547,12 +591,128 @@ code path deterministically, and stopping it would have taken down 15 live sites
   which is precisely the failure G7 predicted on an amber-foreground theme. Either use
   `Theme.glyphFor()` in the dot or give `warn` a distinct shape.
 
-### Phase 3 — Panel `v0.2`
+#### 7.6 What Phase 1 corrected
 
-- [ ] `Panel.qml`, `DenseView.qml`, `ColumnsView.qml`, view toggle bound to `v`, choice
-      persisted in the bar's settings.
-- [ ] All sections from §5.2; leaf components; scroll + collapse for 15+ sites.
-- [ ] Escape closes; `summon`/`hide` routes work; survives disable/re-enable and a shell restart.
+Four things the plan got wrong, all of them only visible once the code existed.
+
+- **The ~2s TTL cache in §4.1 cannot exist where the plan put it.** `hubdev` is a
+  process-per-invocation CLI: the process is built, answers, and dies. A cache inside it is
+  written and thrown away in the same breath. The callers that would benefit are the ones
+  that hold the managers open — the Wails GUI, and the loopback daemon of §4 approach B — so
+  the cache belongs at *that* level, not in the verb. What actually protects HubDev from a
+  burst is the widget's own coalescing (`internal.inFlight`, never two spawns in flight) plus
+  the tier split, and those already exist. **§4.1's cache line is withdrawn, not deferred.**
+- **`update_available` had to be redefined to keep the "never go to the network" promise.**
+  `updater.Check` is cache-backed but falls through to HTTP when the cache is cold — fine for
+  a human who asked, fatal in a 30-second poll loop where a DNS timeout stalls a bar. The one
+  piece of new code in HubDev is `updater.CachedLatest`, which reads the on-disk cache and
+  returns "" if it is stale or absent. **A stale cache now reports nothing rather than
+  something old**, because unlike the splash gate, nobody here is blocked on the answer.
+- **`platform.RunDiagnostics`, not `App.RunDiagnostics`.** The `App` binding fires a
+  telemetry event. Left alone, a widget polling every 30 seconds would have reported a few
+  thousand *"the user ran doctor"* events a day that no user ever ran — poisoning HubDev's own
+  product analytics from inside its own bar plugin. The kind of bug that never surfaces as a
+  bug.
+- **The PROPOSED fields split three ways, and the split was worth making explicit.**
+  `route_present` **shipped** and is genuinely new information — it is the difference between
+  a site being *linked* and being *reachable*, computed by matching the site domain against
+  Caddy's live route table, which is already fetched for the route count. `update_available`
+  **shipped, redefined** as above. `tls_expires_in_days` **did not ship**: nothing in HubDev
+  reads per-site certificate expiry today, and inventing a number would make the widget lie
+  about the one thing a certificate warning exists to say. `Model.js` already treats it as
+  absent-means-unknown, so the 14-day warning is simply dormant until it exists.
+
+Two smaller decisions, recorded because they are the kind that get "tidied" later:
+
+- **Absent and empty are different answers.** A section not requested is omitted; a section
+  requested with nothing in it is `[]`. That is what lets a partial reply be merged over a
+  full one, and it is why `docker.reclaimable_bytes` is *omitted* rather than sent as `0` —
+  HubDev has no `docker system df` equivalent, and `0` would assert "nothing to reclaim",
+  which is a different claim from "we did not look". Same for `backups.last_at`.
+- **An unknown `--include=` section is a warning on stderr; an unknown *argument* is exit 2.**
+  A client is allowed to be newer than the binary it is talking to, so asking a v1.29 HubDev
+  for a section only v1.31 knows about must return everything else rather than fail the read.
+  A typo costs one missing section and one line of stderr, which is the cheaper mistake.
+
+**And one defect in Phase 2 that only Phase 1 could reveal.** Until `--include=` existed,
+every reply was complete, so `succeed()` could replace the summary wholesale. With real tiers,
+a cheap poll — which carries no `services` — reduced to *"Services 0/0"*, so an open panel
+would have flickered between `5/8` and `0/0` every five seconds. Fixed with `Model.merge()`,
+which relies on exactly the absent-vs-empty rule above: a key that is present wins, a key that
+is missing is inherited, no section list needed. Five new tests; the suite is **53**.
+
+### Phase 3 — Panel `v0.2` ✅ 2026-09-01
+
+- [x] `Panel.qml`, `DenseView.qml`, `ColumnsView.qml`, view toggle bound to `v`, choice
+      persisted in the bar's settings entry (`shell.json` → `{"id":"io.hubdev.buddy","view":…}`).
+- [x] All sections from §5.2 as their own components — `SitesSection`, `ServicesSection`,
+      `EnvironmentSection`, `AttentionSection`, `ExtrasSection` — so the two views compose the
+      same sections rather than each restating them. Leaves: `StatusDot`, `Section`,
+      `InfoRow`, `SiteRow`, `ServiceRow`, `CollapseRow`.
+- [x] Scroll (the body is a `Flickable` capped at 75% of the available screen height) and
+      collapse (parked sites, never-configured services), verified against the real 15 sites.
+- [x] Escape closes; `open`/`close`/`toggle` IPC routes broadcast to every monitor; survives a
+      shell restart.
+- [x] All three states verified on screen: healthy, the `caddy-down` fixture driven through
+      the live widget, and the tooltip/mark unchanged. Suite **72** tests.
+- [x] **Review pass, 2026-09-01.** Environment reordered, the promoted checks re-worded, and
+      site rows made clickable (below). Suite **78** tests.
+
+**The panel needed no new CLI.** Every section is built from the Phase 1 contract as shipped,
+including Node's version (health check `nodejs`) which lerd Glance shows and we had assumed
+was missing. The one thing lerd has that we cannot build is its CPU/memory meter strip —
+§5.2's decision to replace it with Environment is now measured rather than argued: HubDev
+exposes no CPU figure at all, and `App.ServiceStats()` costs a Docker stats sample per
+service (the daemon samples over ~1s before answering), which is not a price a 30-second poll
+should pay. If the strip is wanted it is a new snapshot section on its own tier, not a field.
+
+**What Phase 3 corrected.** Two, and the first is the kind the fixtures exist to catch:
+
+- **`caddy-down.json` described a document the CLI cannot emit.** It set `route_present: false`
+  on all 15 sites; the shipped Go *omits* the field when Caddy is down, because with no route
+  table to consult every site would read as routeless and one stopped Caddy would be reported
+  fifteen times. The fixture was corrected to match the implementation — the first time the
+  "fixtures are the contract" rule has cost a fixture rather than a code change.
+- **…which exposed a real hole in the model.** With `route_present` absent, `routePresent`
+  correctly reads as "unknown, not a fault" — but the panel then drew fifteen **emerald**
+  sites under a red Caddy row, which is the one way this panel could actively mislead. Sites
+  now carry `serving` (active **and** routed **and** Caddy up) alongside `routePresent`: the
+  first decides the dot, the second decides whether to raise an issue. Only visible by putting
+  a failure fixture on screen; no test was going to ask "what colour is this row".
+- **The value elides, not the label.** `InfoRow` gave the value priority and rendered
+  `DNS (.t…` beside a health detail long enough to eat the row. The half that has to survive a
+  narrow panel is the half that says *which row you are reading*.
+- **`versionLabel`** — HubDev reports a service version as whatever its provider calls it, so
+  prefixing every one with `v` produced `vlatest` and `valpine`. Numbers get the prefix;
+  tags do not.
+
+**What the first review of the panel changed.** Three, from reading it as a user rather than
+as its author:
+
+- **Order is an argument.** Caddy, DNS and the hosts file are one question asked three ways —
+  *will a URL resolve at all* — and DNS and hosts were sitting below Docker, where they read as
+  trivia. They now follow Caddy directly; Node stays with the runtimes. `ENV_CHECKS` carries an
+  `after` key so the placement is data with a test on it, not the order of two loops.
+- **The doctor's wording is not the panel's wording.** `hubdev doctor` writes for a full-screen
+  report and can afford `DNS (.test)` / *"Port 80 listening, .test domains should resolve"*; a
+  420px row cannot, and the trailing clause only restates the dot. The label loses the TLD
+  because it is *wrong* as well as long — this machine serves `.test`, `.lab` and `.craft`, so
+  `(.test)` names one of three. **The value override applies only while the check is green:** a
+  failing check's detail is the reason it failed, and our cheerful stand-in beside a red dot
+  would be a lie. That distinction is the test worth having here.
+- **A site row is a link.** Clicking one opens it in the desktop's browser. It is the one action
+  worth putting on a site now rather than in Phase 4 — it is what a domain is *for*, it cannot
+  break anything, and it needs no confirm gate. `Model.siteUrl()` picks the scheme from the
+  site's own `tls` (this machine has some of each) and validates the domain as a plain hostname
+  before it reaches a command line; `BarWidget.openUrl()` hands a fixed argv to
+  `Util.execArgv`, detached, so nothing in the shell waits on a browser. The row raises a
+  signal — sections and views still do no I/O.
+
+**Panel components are available to third-party plugins.** The same question R1 asked about
+`Quickshell.Io`, asked again about `qs.Ui`'s panel machinery, and answered the same way — by
+doing it. `Panel`, `KeyboardPanel`, `PanelKeyCatcher`, `PanelSectionHeader`, `PanelSeparator`,
+`PanelActionButton` and `Button` are all exported in `/usr/share/omarchy/shell/Ui/qmldir` and
+work from `~/.config/omarchy/plugins`.
 
 ### Phase 4 — Actions `v0.3`
 
@@ -622,9 +782,9 @@ so it refuses exactly what the running shell would refuse.
 | | Risk | Mitigation |
 |---|---|---|
 | R1 | ~~**`Process` may not be available to plugins.** Kills approach A.~~ **CLOSED 2026-08-31.** | The Phase 0 spike does it, live, as a third-party plugin (§7 P0) — and `bobbynicholas.omaland`, an unrelated third-party plugin already installed here, imports `Quickshell.Io` too. No residual risk. The A'/B rungs remain documented only as insurance against a future tightening of the plugin API. |
-| R2 | Poll cost grows with running containers. **Re-measured under load (§7.2) and worse than assumed: `service:list` 87ms → 568ms, `status` 374ms → 918ms, naive fan-out ~3.1s.** | Confirmed real, and it moved `services` out of the cheap tier: **cheap** (`caddy,php,sites` ≈560ms) 30s/5s · **expensive** (`services,docker,health,backups`) 30s only. One aggregate call · TTL cache — now load-bearing, not a nicety · coalescing · suspend when hidden. |
+| R2 | Poll cost grows with running containers. **Re-measured under load (§7.2) and worse than assumed: `service:list` 87ms → 568ms, `status` 374ms → 918ms, naive fan-out ~3.1s.** | Confirmed real, and it moved `services` out of the cheap tier: **cheap** (`caddy,php,sites` ≈560ms) 30s/5s · **expensive** (`services,docker,health,backups`) 30s only. One aggregate call · ~~TTL cache~~ **withdrawn, §7.6 — it cannot work in a process-per-call CLI; the coalescing does the job instead** · coalescing · suspend when hidden. **Shipped cost: cheap 435 ms, full 2,609 ms.** |
 | R3 | ~~A verb prompts for sudo and hangs the shell process **invisibly**.~~ **Re-scoped 2026-08-31 (§7.1): the invisible-prompt mode does not exist.** `RunPrivileged` only ever runs `sudo -n` (never prompts) then falls back to `pkexec` — a *visible* polkit dialog that still blocks the `Process`. | Enumerated: `service:*`, `caddy:start\|stop`, `php:start\|stop` are all NOPASSWD-covered and safe. **`site:fix` is excluded** — it calls `chmod` outside the sudoers rule, and only *conditionally*, so it passes every manual test until it doesn't. Hard timeout on every `Process` regardless. |
-| R4 | The contract lands late relative to the plugin. *(Downgraded: the CLI source is fully available and cloned at `~/Projects/HubDev/devhub-go`. This is a scheduling risk, not an access one — and with v1.28.0 shipping without `snapshot`, it is the risk most likely to set the v1 date.)* | Phases 1 and 2 run in parallel against committed fixtures, so neither blocks the other. `SourceFiles.js` remains as a spike-only fallback, not a shipping path. |
+| R4 | ~~The contract lands late relative to the plugin.~~ **CLOSED 2026-08-31.** `hubdev snapshot --json` is implemented in `devhub-go` and its live output reduces through the widget's own `Model.js` (§7 P1). | The parallel-phase bet paid: the 10 fixtures were hand-written from `hubdev mcp` output *before* the Go code existed and **passed unchanged against the real implementation**. Residual risk is a release, not a design: `AppVersion` is CI-bumped, so v1.29.0 is the version that carries it, and until then the widget correctly shows its version gate. |
 | R5 | Quattro plugin API is young; `schemaVersion 1` may move. | Now running Omarchy 4.0.2-1, where the validator requires `schemaVersion` to be exactly the JSON number `1`. Pin it, run `omarchy plugin validate` in CI, and re-check on every Omarchy release — the API is young enough that a `2` is a question of when. |
 | R6 | Secrets on screen: `services.yml` passwords, `license.json` key, tokens in logs. | Strip at the contract; no log surfaces in v1; a test that greps rendered strings for known secrets. |
 | R7 | The GUI and the widget mutate concurrently and disagree. | Snapshot is read-only truth + refresh burst after every mutation; never cache mutable state in the widget. |
@@ -637,8 +797,10 @@ so it refuses exactly what the running shell would refuse.
 1. ~~Is the HubDev CLI source yours to change?~~ **Answered: yes** — full access to the
    `hubdev` organization including the CLI source and binary, cloned at
    `~/Projects/HubDev/devhub-go`. The remaining question is narrower:
-   **which HubDev release carries `snapshot --json`**, since the plugin must version-gate
-   against it. Current is v1.28.0 and does not, so the answer is v1.29.0 at the earliest.
+   ~~**which HubDev release carries `snapshot --json`**~~ **Answered: v1.29.0.** The verb is
+   committed on `devhub-go`'s `main`; `AppVersion` is bumped by CI on push, and the last
+   release was v1.28.0. Until that release is cut and installed, `/usr/bin/hubdev` has no
+   `snapshot` and the bar correctly shows *"This HubDev is too old"*.
 2. **Public or personal?** A marketplace plugin makes this part of HubDev's product story
    (and a good answer to lerd Glance); a personal plugin can skip Phase 5 entirely.
 3. **Read-only v1, or actions from the start?** Read-only halves the surface and removes

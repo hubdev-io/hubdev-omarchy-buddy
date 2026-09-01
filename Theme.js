@@ -42,3 +42,63 @@ function glyphFor(level) {
 function dotVisible(level) {
   return level === "warn" || level === "down";
 }
+
+// ---------------------------------------------------------------- icons ----
+//
+// Nerd Font glyphs for the panel's own chrome. Every codepoint here is one
+// lerd Glance already ships against Omarchy, so they are known to resolve in
+// the shell's font rather than guessed from a cheatsheet — a missing glyph
+// renders as a tofu box, which is the kind of thing that only shows up on
+// someone else's machine.
+//
+// These are decoration, not state. State is carried by COLOR + GLYPH above,
+// which is the pair the plan requires (§5.3.1).
+var ICONS = {
+  "view-dense": "\u{F0569}",     // nf-md-table_large
+  "view-columns": "\u{F0571}",   // nf-md-view_column
+  "external-link": "",
+  "refresh": "",
+  "caret-down": "",
+  "caret-right": "",
+  "spinner": "",
+  "lock": ""
+};
+
+function icon(name) {
+  return ICONS[name] || "";
+}
+
+// Site drivers. HubDev reports `laravel` for a Laravel app and `generic` for
+// anything it could not identify; unknown values fall through to the generic
+// glyph rather than to empty, so a driver added upstream still draws a row.
+var DRIVER_GLYPHS = {
+  laravel: "",     // bolt
+  wordpress: "",
+  generic: ""      // file
+};
+
+function driverGlyph(driver) {
+  return DRIVER_GLYPHS[driver] || DRIVER_GLYPHS.generic;
+}
+
+// The service dot: running is ok, a service that should be running and is not
+// is down, and anything else is simply idle. Deliberately NOT `warn` — the
+// panel already names broken services in "Needs attention", and painting six
+// stopped-on-purpose services amber would make the section unreadable.
+function serviceLevel(row) {
+  if (row.up)
+    return "ok";
+  return row.broken ? "down" : "idle";
+}
+
+// A site is ok when it is serving, down when the user meant it to serve and it
+// does not, and idle when it is parked. `active` is the intent; `serving` is
+// whether the machine agrees — which is a stricter question than `routePresent`
+// alone, because with Caddy stopped there is no route table and every site is
+// unreachable regardless of what it is linked to. Model.summarize owns that
+// rule; this only paints it.
+function siteLevel(row) {
+  if (!row.active)
+    return "idle";
+  return row.serving ? "ok" : "down";
+}

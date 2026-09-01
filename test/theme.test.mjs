@@ -41,3 +41,32 @@ test("a healthy environment draws no dot; a broken one does", () => {
   assert.equal(Theme.dotVisible(Model.summarize(fixture("caddy-down")).level), true);
   assert.equal(Theme.dotVisible(Model.summarize(fixture("autostart-service-stopped")).level), true);
 });
+
+test("every icon resolves to a real glyph, never to empty", () => {
+  for (const name of ["view-dense", "view-columns", "external-link", "refresh",
+                      "caret-down", "caret-right", "spinner", "lock"]) {
+    assert.notEqual(Theme.icon(name), "", `${name} is missing`);
+  }
+  assert.equal(Theme.icon("no-such-icon"), "");
+});
+
+test("an unknown site driver still draws a glyph", () => {
+  assert.notEqual(Theme.driverGlyph("laravel"), "");
+  assert.equal(Theme.driverGlyph("something-hubdev-adds-in-2027"),
+    Theme.driverGlyph("generic"),
+    "a driver we have never heard of must not render an invisible row");
+});
+
+test("stopped-on-purpose services are idle, not warnings", () => {
+  assert.equal(Theme.serviceLevel({ up: true, broken: false }), "ok");
+  assert.equal(Theme.serviceLevel({ up: false, broken: true }), "down");
+  assert.equal(Theme.serviceLevel({ up: false, broken: false }), "idle",
+    "six amber rows for services nobody asked to run is an unreadable panel");
+});
+
+
+test("a parked site is idle; an intended-but-unreachable one is down", () => {
+  assert.equal(Theme.siteLevel({ active: true, serving: true }), "ok");
+  assert.equal(Theme.siteLevel({ active: true, serving: false }), "down");
+  assert.equal(Theme.siteLevel({ active: false, serving: false }), "idle");
+});

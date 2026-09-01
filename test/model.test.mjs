@@ -235,3 +235,310 @@ test("fixtures themselves carry no secrets", () => {
     assert.ok(!/"password"|"secret"|"api_key"|"license_key"/.test(raw), `${name} carries a secret-shaped key`);
   }
 });
+
+// ------------------------------------------------- partial-tier merging ----
+//
+// These exist because Phase 1 landed and made the two tiers real. Until
+// `hubdev snapshot --json --include=` existed, every reply was complete and
+// nothing here could go wrong.
+
+test("a cheap-tier reply does not blank the sections it did not ask for", () => {
+  const full = fixture("healthy");
+  // Exactly what `--include=caddy,php,sites` returns: the envelope plus three
+  // sections, with the rest ABSENT — not empty.
+  const cheap = {
+    schema: full.schema,
+    hubdev: full.hubdev,
+    generated_at: "2026-09-01T02:00:00Z",
+    caddy: full.caddy,
+    php: full.php,
+    sites: full.sites
+  };
+
+  const naive = Model.summarize(cheap);
+  assert.equal(naive.services.total, 0, "precondition: a partial reply on its own has no services");
+
+  const merged = Model.summarize(Model.merge(full, cheap));
+  assert.equal(merged.services.total, 8);
+  assert.equal(merged.services.up, 5);
+  assert.equal(merged.docker.available, true);
+  assert.equal(merged.license.status, "active");
+  assert.ok(merged.env.flags.length > 0, "health flags survived the cheap poll");
+});
+
+test("what the cheap tier does send wins over what was inherited", () => {
+  const full = fixture("healthy");
+  const cheap = {
+    schema: 1,
+    hubdev: full.hubdev,
+    generated_at: "2026-09-01T02:00:00Z",
+    caddy: { running: false, version: "2.11.4", mode: "native", routes: 0 },
+    php: full.php,
+    sites: full.sites
+  };
+  const merged = Model.summarize(Model.merge(full, cheap));
+  assert.equal(merged.caddy.running, false, "a fresh section must replace, not merge into, the old one");
+  assert.equal(merged.level, "down");
+  assert.equal(merged.services.total, 8, "and the inherited sections are still there");
+});
+
+test("an empty section is a real answer and overwrites the inherited one", () => {
+  // `[]` means the caller asked and there was nothing — the opposite of
+  // absent. Inheriting over it would report sites that are gone.
+  const merged = Model.merge(fixture("healthy"), { schema: 1, sites: [] });
+  assert.deepEqual(merged.sites, []);
+  assert.equal(Model.summarize(merged).sites.total, 0);
+});
+
+test("merging onto nothing is just the fresh document", () => {
+  const full = fixture("healthy");
+  assert.equal(Model.summarize(Model.merge({}, full)).level, "ok");
+  assert.equal(Model.summarize(Model.merge(undefined, full)).sites.total, 15);
+  assert.equal(Model.summarize(Model.merge(null, full)).services.total, 8);
+});
+
+test("merge never mutates either input", () => {
+  const prev = fixture("healthy");
+  const fresh = { schema: 1, caddy: { running: false } };
+  const prevBefore = JSON.stringify(prev);
+  const freshBefore = JSON.stringify(fresh);
+  Model.merge(prev, fresh);
+  assert.equal(JSON.stringify(prev), prevBefore);
+  assert.equal(JSON.stringify(fresh), freshBefore);
+});
+
+// ------------------------------------------------- panel projections ----
+
+test("sites split into serving and not, with the routeless surfaced first", () => {
+  const s = Model.summarize(fixture("healthy"));
+  const g = Model.siteGroups(s);
+
+  assert.equal(g.active.length + g.inactive.length, s.sites.rows.length);
+  assert.ok(g.active.every((r) => r.active));
+  assert.ok(g.inactive.every((r) => !r.active));
+  assert.equal(g.inactiveCount, g.inactive.length);
+
+  // Within each group, domains read alphabetically — a panel is scanned, not
+  // searched, so the order has to be the one the eye can binary-search.
+  const domains = g.inactive.map((r) => r.domain);
+  assert.deepEqual(domains, [...domains].sort());
+});
+
+test("a site that is active but unrouted sorts above every healthy one", () => {
+  const doc = fixture("healthy");
+  const victim = doc.sites.find((x) => x.active);
+  victim.route_present = false;
+
+  const g = Model.siteGroups(Model.summarize(doc));
+  assert.equal(g.active[0].domain, victim.domain,
+    "the row the panel exists to surface must not be buried at position 9 of 14");
+});
+
+test("services set up here are listed; ones never configured collapse", () => {
+  const s = Model.summarize(fixture("healthy"));
+  const g = Model.serviceGroups(s);
+
+  assert.ok(g.installed.every((r) => r.installed));
+  assert.ok(g.available.every((r) => !r.installed));
+  assert.equal(g.availableCount, g.available.length);
+  assert.equal(g.installed.length + g.available.length, s.services.rows.length);
+});
+
+test("a broken service sorts first, then running, then the rest", () => {
+  const s = Model.summarize(fixture("autostart-service-stopped"));
+  const g = Model.serviceGroups(s);
+  const broken = g.installed.filter((r) => r.broken);
+
+  assert.ok(broken.length > 0, "fixture precondition");
+  assert.equal(g.installed[0].broken, true);
+});
+
+test("envRows always leads with Caddy and carries one row per PHP version", () => {
+  const s = Model.summarize(fixture("healthy"));
+  const rows = Model.envRows(s);
+
+  assert.equal(rows[0].key, "caddy");
+  assert.equal(rows[0].level, "ok");
+
+  const php = rows.filter((r) => r.key.startsWith("php-"));
+  assert.equal(php.length, s.php.rows.length);
+  assert.ok(php.some((r) => r.label.includes("(default)")));
+
+  // Every row is complete — the view never branches on undefined.
+  for (const r of rows) {
+    for (const key of ["key", "label", "value", "level"])
+      assert.ok(key in r, `${r.key}: missing ${key}`);
+  }
+});
+
+test("a non-default PHP with its pool down is a fact, not a fault", () => {
+  const s = Model.summarize(fixture("healthy"));
+  const rows = Model.envRows(s);
+  const secondary = rows.find((r) => r.key.startsWith("php-") && !r.label.includes("(default)"));
+
+  assert.ok(secondary, "fixture precondition: more than one PHP version");
+  assert.ok(secondary.level !== "warn" && secondary.level !== "down",
+    "this machine idles with 8.5 stopped; colouring it would cry wolf forever");
+});
+
+test("Caddy stopped reads as down in the panel, not merely as a value", () => {
+  const rows = Model.envRows(Model.summarize(fixture("caddy-down")));
+  assert.equal(rows[0].key, "caddy");
+  assert.equal(rows[0].level, "down");
+  assert.equal(rows[0].value, "stopped");
+});
+
+test("Docker missing is only a fault when a service actually needs it", () => {
+  const withDocker = Model.envRows(Model.summarize(fixture("docker-down")))
+    .find((r) => r.key === "docker");
+  assert.equal(withDocker.level, "warn");
+
+  const doc = fixture("docker-down");
+  for (const svc of doc.services) svc.mode = "native";
+  const withoutDocker = Model.envRows(Model.summarize(doc)).find((r) => r.key === "docker");
+  assert.equal(withoutDocker.level, "idle",
+    "a machine running everything natively must not be told Docker is down");
+});
+
+test("the diagnostics roll-up counts every check and takes the worst level", () => {
+  const s = Model.summarize(fixture("healthy"));
+  const d = Model.checksSummary(s);
+
+  assert.equal(d.total, s.env.flags.length);
+  assert.equal(d.ok, s.env.flags.filter((f) => f.level === "ok").length);
+  assert.equal(d.level, s.env.flags.some((f) => f.level === "down") ? "down"
+    : s.env.flags.some((f) => f.level !== "ok") ? "warn" : "ok");
+  assert.match(d.label, /^\d+\/\d+ passing$/);
+});
+
+test("a snapshot with no health section produces no diagnostics row", () => {
+  const s = Model.summarize(fixture("minimal"));
+  assert.equal(Model.checksSummary(s).total, 0);
+  assert.ok(!Model.envRows(s).some((r) => r.key === "diagnostics"));
+});
+
+test("check ids survive into the summary", () => {
+  const s = Model.summarize(fixture("healthy"));
+  assert.ok(s.env.flags.length > 0);
+  assert.ok(s.env.flags.every((f) => typeof f.id === "string" && f.id.length > 0),
+    "envRows groups on the id; dropping it makes the Environment section unbuildable");
+});
+
+test("panel projections never throw on the empty or unreachable shape", () => {
+  for (const s of [Model.empty(), Model.unreachable("nope")]) {
+    assert.doesNotThrow(() => Model.siteGroups(s));
+    assert.doesNotThrow(() => Model.serviceGroups(s));
+    assert.doesNotThrow(() => Model.envRows(s));
+    assert.doesNotThrow(() => Model.checksSummary(s));
+  }
+});
+
+test("only versions that are numbers get a v", () => {
+  assert.equal(Model.versionLabel("8.0"), "v8.0");
+  assert.equal(Model.versionLabel("16"), "v16");
+  assert.equal(Model.versionLabel("latest"), "latest", "'vlatest' is not a version");
+  assert.equal(Model.versionLabel("alpine"), "alpine");
+  assert.equal(Model.versionLabel("2025-latest"), "v2025-latest");
+  assert.equal(Model.versionLabel(""), "");
+  assert.equal(Model.versionLabel(undefined), "");
+});
+
+test("with Caddy stopped no site is serving, even though route_present is absent", () => {
+  const doc = fixture("caddy-down");
+  assert.ok(doc.sites.every((s) => !("route_present" in s)),
+    "the CLI omits route_present with Caddy down — the fixture must match it");
+
+  const s = Model.summarize(doc);
+  assert.ok(s.sites.rows.every((r) => r.routePresent),
+    "absent is unknown, not missing — this is what stops 15 duplicate issues");
+  assert.ok(s.sites.rows.every((r) => !r.serving),
+    "...but unknown must not read as fine: nothing is reachable with no reverse proxy");
+
+  // The issue is still raised exactly once, by Caddy, not once per site.
+  assert.equal(s.issues.filter((i) => /Caddy route/.test(i)).length, 0);
+  assert.equal(s.issues.filter((i) => /Caddy is stopped/.test(i)).length, 1);
+});
+
+test("a site is serving only when it is active, routed and Caddy is up", () => {
+  const s = Model.summarize(fixture("healthy"));
+  for (const r of s.sites.rows)
+    assert.equal(r.serving, r.active && r.routePresent && s.caddy.running);
+  assert.ok(s.sites.rows.some((r) => r.serving), "fixture precondition");
+});
+
+// ------------------------------------------------- environment ordering ----
+
+test("DNS and the hosts file sit directly under Caddy, not below Docker", () => {
+  const rows = Model.envRows(Model.summarize(fixture("healthy")));
+  const at = (key) => rows.findIndex((r) => r.key === key);
+
+  // Caddy, DNS, hosts file: one question — will a URL resolve — asked three
+  // ways. Contiguity is the whole reason the order is worth a test.
+  assert.equal(at("caddy"), 0);
+  assert.equal(at("dns_test"), 1);
+  assert.equal(at("hosts_file"), 2);
+
+  assert.ok(at("docker") > at("hosts_file"));
+  assert.ok(at("nodejs") > at("docker"), "Node belongs with the runtimes");
+  assert.equal(rows[rows.length - 1].key, "diagnostics");
+});
+
+test("a promoted check is renamed for the panel but keeps its own words when it fails", () => {
+  const doc = fixture("healthy");
+  const dns = doc.health.checks.find((c) => c.id === "dns_test");
+  assert.match(dns.label, /\(\.test\)/, "fixture precondition");
+
+  const ok = Model.envRows(Model.summarize(doc)).find((r) => r.key === "dns_test");
+  assert.equal(ok.label, "DNS", "the TLD names one of three on this machine");
+  assert.equal(ok.value, "Port 80 listening");
+
+  // The override is decoration over a green check. Over a red one it would be
+  // a lie printed next to the dot that contradicts it.
+  dns.level = "down";
+  dns.detail = "Port 80 is not listening";
+  const bad = Model.envRows(Model.summarize(doc)).find((r) => r.key === "dns_test");
+  assert.equal(bad.label, "DNS");
+  assert.equal(bad.value, "Port 80 is not listening");
+  assert.equal(bad.level, "down");
+});
+
+test("a check the CLI did not send draws no row at all", () => {
+  const doc = fixture("healthy");
+  doc.health.checks = doc.health.checks.filter((c) => c.id !== "hosts_file");
+  const rows = Model.envRows(Model.summarize(doc));
+
+  assert.equal(rows.filter((r) => r.key === "hosts_file").length, 0);
+  assert.equal(rows[1].key, "dns_test", "the rest of the block closes up");
+});
+
+// -------------------------------------------------------------- siteUrl ----
+
+test("a site opens over the scheme it actually serves", () => {
+  assert.equal(Model.siteUrl({ domain: "beacon.lab", tls: true }), "https://beacon.lab");
+  assert.equal(Model.siteUrl({ domain: "beacon.lab", tls: false }), "http://beacon.lab");
+  // Absent is not true: an unknown TLS state must not promise https.
+  assert.equal(Model.siteUrl({ domain: "beacon.lab" }), "http://beacon.lab");
+});
+
+test("every site in every fixture yields a URL the browser can be handed", () => {
+  for (const name of fixtureNames()) {
+    for (const row of Model.summarize(fixture(name)).sites.rows) {
+      const url = Model.siteUrl(row);
+      assert.match(url, /^https?:\/\/[a-z0-9.-]+$/i, `${name}: ${row.domain} -> ${url}`);
+    }
+  }
+});
+
+test("a domain that is not a hostname opens nothing rather than something", () => {
+  // The domain reaches a command line. It comes from HubDev's own config and
+  // is very probably fine — but a row that silently does nothing is a far
+  // smaller failure than a row that runs something.
+  for (const domain of ["", "no-dot", "a b.test", "x.test; id", "$(id).test",
+                        "-lead.test", "http://x.test", "x.test/../..",
+                        "x".repeat(300) + ".test"]) {
+    assert.equal(Model.siteUrl({ domain, tls: true }), "",
+      `${JSON.stringify(domain)} must not become a URL`);
+  }
+  assert.equal(Model.siteUrl(null), "");
+  assert.equal(Model.siteUrl({}), "");
+});

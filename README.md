@@ -3,18 +3,33 @@
 > The state of your [HubDev](https://hubdev.io) environment at a glance in the Omarchy
 > Quattro bar. Sites, services, PHP versions, Caddy and Docker — without raising the GUI.
 
-**Status: Phases 0 and 2 complete. The widget runs in the bar today.**
+**Status: Phases 0–3 complete. The widget runs in the bar, the contract it reads exists, and
+clicking it opens the panel.**
 
 Omarchy **Quattro 4.0.2-1** (Quickshell 0.3.1). `io.hubdev.buddy` is installed and rendering:
 a mark that stays quiet when the environment is healthy, gains an **amber dot** when something
-needs attention, and a **red dot** when nothing will serve. All three states are verified on
-screen, and the QML-free logic has 48 tests over 10 fixtures exported from live `hubdev mcp`
-output.
+needs attention, and a **red dot** when nothing will serve. Clicking it opens a panel with
+Sites, Services and Environment — and *Needs attention* only when there is something to say —
+in either a dense list or three columns, toggled with `v` and remembered across restarts.
+Clicking a site opens it in the desktop's browser. All three states are verified on screen,
+and the QML-free logic has 78 tests over 10 fixtures.
 
-**Phase 1 has not shipped**, so against a stock HubDev the widget correctly reports
-*"This HubDev is too old — `snapshot --json` is not available"*. `tools/hubdev-snapshot`
-implements that contract over `hubdev mcp` for development, and is the acceptance target for
-the Go work.
+**`hubdev snapshot --json` is implemented** in HubDev's own CLI, and the widget's
+`SourceJson.parse()` → `Model.summarize()` reduces its live output to `level: ok`,
+`Sites 14/15 · Services 5/8 · PHP 8.4 (default) · Caddy 2.11.4`. The two halves were built in
+parallel against committed fixtures written from `hubdev mcp` output *before* the Go code
+existed — and those fixtures **passed unchanged** against the real implementation.
+
+The verb ships in **HubDev v1.29.0**, which is built and installed here. Against an older
+HubDev the widget still, correctly, reports *"This HubDev is too old — `snapshot --json` is
+not available"*.
+
+**The panel needed no new CLI.** Every section is built from the Phase 1 contract as shipped —
+including Node's version, which arrives as a health check rather than a field of its own. The
+one thing [lerd Glance](https://github.com/lerd-env/lerd-omarchy-glance) has that HubDev
+cannot supply is its CPU/memory meter strip: there is no CPU figure at all, and the memory
+figure costs a Docker stats sample per service, which is not a price a 30-second poll should
+pay. §5.2 replaces it with the Environment column.
 
 ## What is here
 
@@ -66,10 +81,14 @@ BarWidget.qml                     the only file that does I/O
 Mark.qml                          the glyph and its state dot
 SourceJson.js                     the transport seam (the import line is the seam)
 Model.js  Theme.js                pure JS, QML-free, tested under node
+Panel.qml                         the popout: header, view, hand-offs
+DenseView.qml  ColumnsView.qml    two arrangements of the same sections
+*Section.qml                      Sites · Services · Environment · Attention · Extras
+Section.qml  InfoRow.qml  SiteRow.qml  ServiceRow.qml  StatusDot.qml  CollapseRow.qml
 test/                             node --test, harness + 10 fixtures
-tools/hubdev-snapshot             dev-only reference implementation of the contract
+tools/hubdev-snapshot             dev-only reference implementation of the contract,
+                                  written before the Go one and kept as its acceptance target
                                   ── still to come ──
-Panel.qml  DenseView.qml  ColumnsView.qml     Phase 3
 Actions.js                                    Phase 4
 ```
 
@@ -79,8 +98,12 @@ directive, so the tests run exactly what the shell loads and there is no second 
 ## Reading the plan
 
 Start at §3.1 (what the HubDev source confirms) and §4 (the architecture decision), then
-**§7 Phase 0** for what running the spike actually established. §11 is an adversarial review
-of the plan by itself: thirteen challenges, seven of which changed it.
+**§7 Phase 0** for what running the spike actually established. **§7.6** is the most useful
+section if you are reading for lessons rather than scope: four things the plan got wrong that
+only became visible once the code existed — including a cache that cannot work in a
+process-per-call CLI, and a telemetry event that a 30-second poll would have fired a few
+thousand times a day. §11 is an adversarial review of the plan by itself: thirteen challenges,
+seven of which changed it.
 
 ## License
 

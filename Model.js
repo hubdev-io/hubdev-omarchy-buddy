@@ -92,6 +92,46 @@ function listNames(names, limit) {
   return names.slice(0, cap).join(", ") + " and " + (names.length - cap) + " more";
 }
 
+// --------------------------------------------------------------- merge ----
+
+// Lay a partial snapshot over the last one.
+//
+// The cheap tier asks for `caddy,php,sites` and gets a document with no
+// `services`, no `docker`, no `health`. Handing that straight to summarize()
+// makes the tooltip say "Services 0/0" every five seconds while the panel is
+// open, then "Services 5/8" again on the next full read — numbers that flicker
+// between true and false are worse than numbers that lag.
+//
+// This works without a section list because the CLI contract makes an
+// unrequested section ABSENT rather than empty (`hubdev snapshot` omits the
+// key; a section that was requested and has nothing in it is `[]`). So the
+// rule is exactly: a key that is present wins, a key that is missing is
+// inherited. The envelope — schema, hubdev, generated_at — is on every reply,
+// so it always reflects the newest read.
+//
+// What is inherited is stale by up to one full-tier interval (30s). That is
+// the trade, and it is the right way round: the expensive sections are the
+// slow-moving ones, and the sections that carry the states worth reacting to
+// fast — Caddy, the default PHP FPM, the site list — are in the cheap tier and
+// are never inherited.
+function merge(prev, fresh) {
+  var out = {};
+  var k;
+  if (prev && typeof prev === "object" && !Array.isArray(prev)) {
+    for (k in prev) {
+      if (prev.hasOwnProperty(k))
+        out[k] = prev[k];
+    }
+  }
+  if (fresh && typeof fresh === "object" && !Array.isArray(fresh)) {
+    for (k in fresh) {
+      if (fresh.hasOwnProperty(k) && fresh[k] !== undefined)
+        out[k] = fresh[k];
+    }
+  }
+  return out;
+}
+
 // -------------------------------------------------------------- reduce ----
 
 function summarize(snapshot) {
@@ -213,9 +253,17 @@ function summarize(snapshot) {
       driver: str(v.driver),
       active: v.active === true,
       tls: tls,
-      // `route_present` is a PROPOSED contract field. Absent means "unknown",
-      // which must not read as "missing" — only an explicit false is a fault.
+      // Absent means "unknown", which must not read as "missing" — only an
+      // explicit false is a fault. The CLI omits the field entirely when Caddy
+      // is down, precisely so a stopped Caddy is reported once instead of
+      // fifteen times.
       routePresent: v.route_present !== false,
+      // ...but "unknown" must not read as "fine" either. A site is serving
+      // only if Caddy is up AND has a route for it: with Caddy stopped there
+      // is no route table to consult and nothing is reachable, so the rows
+      // have to say so. Drawing fifteen emerald sites under a red Caddy is the
+      // one way this panel could actively mislead.
+      serving: v.active === true && v.route_present !== false && s.caddy.running,
       expiresInDays: typeof v.tls_expires_in_days === "number" ? v.tls_expires_in_days : null,
       url: (tls ? "https://" : "http://") + domain
     };
@@ -244,6 +292,11 @@ function summarize(snapshot) {
   // ---- health flags ------------------------------------------------------
   s.env.flags = arr(obj(snap.health).checks).map(function (c) {
     return {
+      // The id is the stable name; the label is prose and may be reworded.
+      // envRows() groups on the id, so dropping it here — as the first cut
+      // did — makes the Environment section impossible to build from a
+      // contract that is allowed to add checks.
+      id: str(c.id),
       label: str(c.label),
       ok: c.level === "ok",
       level: str(c.level) || "ok",
@@ -293,6 +346,239 @@ function levelFor(s) {
 // running, per plan §5.2. Nothing to show is not the same as zero.
 function resourcesFor(s) {
   return { shown: s.docker.available && s.docker.running > 0, running: s.docker.running };
+}
+
+// ------------------------------------------------- panel projections ----
+//
+// Everything below turns the summary into the rows the panel draws. It lives
+// here, not in a .qml, for the usual reason: `node --test` runs this file and
+// cannot run a view. A view that needs a decision — what to collapse, what to
+// call something, which of eighteen health checks earn a line — asks for it
+// here and binds to the answer.
+
+// Sites split into what is serving and what is not.
+//
+// This machine has 15 sites where lerd Glance assumes 1, so the panel cannot
+// simply list them: inactive sites collapse behind a count and the active ones
+// sort by domain, which is what the user actually reads them by. A site that is
+// active but has no Caddy route sorts to the top of its group — it is the row
+// the panel exists to surface.
+function siteGroups(s) {
+  var active = [];
+  var inactive = [];
+  var rows = s && s.sites ? s.sites.rows : [];
+  for (var i = 0; i < rows.length; i++)
+    (rows[i].active ? active : inactive).push(rows[i]);
+
+  active.sort(function (a, b) {
+    var af = a.routePresent ? 1 : 0;
+    var bf = b.routePresent ? 1 : 0;
+    if (af !== bf)
+      return af - bf;
+    return a.domain < b.domain ? -1 : a.domain > b.domain ? 1 : 0;
+  });
+  inactive.sort(function (a, b) {
+    return a.domain < b.domain ? -1 : a.domain > b.domain ? 1 : 0;
+  });
+
+  return { active: active, inactive: inactive, inactiveCount: inactive.length };
+}
+
+// Services split by whether they are set up at all.
+//
+// `installed: false` services are offered by HubDev but never configured here —
+// on this machine that is meilisearch, minio and reverb. Listing them as
+// "stopped" alongside real ones reads as three things broken, which is why they
+// collapse behind a count. Broken services (auto-start, installed, stopped)
+// sort first for the same reason routeless sites do.
+// The URL a site row opens, or "" if it cannot safely be built.
+//
+// This lives here rather than in the .qml for both of the usual reasons: it is
+// a rule (the scheme follows `tls`, which is per-site — this machine has some
+// of each), and it is the one string in the panel that reaches a command line.
+// The domain comes from HubDev's own config and is very probably fine, but
+// "probably fine" is not the standard for an argument to a browser, so it is
+// validated as a plain hostname rather than trusted. Anything else opens
+// nothing, which is the correct failure: a row that does not respond is a much
+// smaller problem than a row that runs something.
+var DOMAIN_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i;
+
+function siteUrl(site) {
+  var v = obj(site);
+  var domain = str(v.domain);
+  if (!domain || domain.length > 253 || !DOMAIN_RE.test(domain))
+    return "";
+  return (v.tls === true ? "https://" : "http://") + domain;
+}
+
+function serviceGroups(s) {
+  var installed = [];
+  var available = [];
+  var rows = s && s.services ? s.services.rows : [];
+  for (var i = 0; i < rows.length; i++)
+    (rows[i].installed ? installed : available).push(rows[i]);
+
+  installed.sort(function (a, b) {
+    if (a.broken !== b.broken)
+      return a.broken ? -1 : 1;
+    if (a.up !== b.up)
+      return a.up ? -1 : 1;
+    return a.display < b.display ? -1 : a.display > b.display ? 1 : 0;
+  });
+  available.sort(function (a, b) {
+    return a.display < b.display ? -1 : a.display > b.display ? 1 : 0;
+  });
+
+  return { installed: installed, available: available, availableCount: available.length };
+}
+
+function checkById(s, id) {
+  var flags = s && s.env ? s.env.flags : [];
+  for (var i = 0; i < flags.length; i++) {
+    if (flags[i].id === id)
+      return flags[i];
+  }
+  return null;
+}
+
+// Health checks that envRows() promotes to a line of their own. Everything
+// else — ports, Composer, the two API reachability probes, disk usage — is
+// counted into the single "Diagnostics" row instead. Anything non-ok is
+// already named in `issues`, so nothing is lost by not drawing it.
+//
+// `after` places the row. DNS and the hosts file sit directly under Caddy
+// because the three of them are one question asked three ways — will a URL
+// resolve at all — and reading them as a block is the point of the section.
+// Stranded below Docker they read as trivia. Node stays with the runtimes.
+//
+// `label` and `value` override what the CLI sends. `hubdev doctor` writes for
+// a full-screen report and can afford "Port 80 listening, .test domains should
+// resolve"; a 420px row cannot, and the trailing clause only restates the dot.
+// The TLD leaves the label because it is wrong as well as long — this machine
+// serves .test, .lab and .craft, so "(.test)" names one of three.
+var ENV_CHECKS = [
+  { id: "dns_test", after: "caddy", label: "DNS", value: "Port 80 listening" },
+  { id: "hosts_file", after: "caddy" },
+  { id: "nodejs", after: "docker" }
+];
+
+// A promoted check as a row. The label override always applies — a name does
+// not depend on state — but the value override applies only while the check is
+// green. A passing check's detail is decoration and can be shortened; a
+// failing one's detail is the *reason*, and replacing it with our cheerful
+// stand-in would put "Port 80 listening" next to a red dot.
+function envCheckRows(s, after) {
+  var rows = [];
+  for (var i = 0; i < ENV_CHECKS.length; i++) {
+    var spec = ENV_CHECKS[i];
+    if (spec.after !== after)
+      continue;
+    var check = checkById(s, spec.id);
+    if (!check)
+      continue;
+    rows.push({
+      key: check.id,
+      label: spec.label || check.label,
+      value: spec.value && check.level === "ok" ? spec.value : check.detail,
+      level: check.level
+    });
+  }
+  return rows;
+}
+
+// The Environment section: the state of the machine rather than of the things
+// running on it (plan §5.2, which replaces lerd's Resources column with this —
+// HubDev has no CPU figure and its memory figure costs a Docker stats sample
+// per service, about a second, which is not a price a 30s poll should pay).
+//
+// Rows are { key, label, value, level }. `level` drives the dot; ok is quiet.
+function envRows(s) {
+  var rows = [];
+
+  rows.push({
+    key: "caddy",
+    label: "Caddy",
+    value: s.caddy.running
+      ? (s.caddy.version || "running") + " · " + plural(s.caddy.routes, "route", "routes")
+      : "stopped",
+    level: s.caddy.running ? "ok" : "down"
+  });
+
+  rows = rows.concat(envCheckRows(s, "caddy"));
+
+  for (var i = 0; i < s.php.rows.length; i++) {
+    var php = s.php.rows[i];
+    rows.push({
+      key: "php-" + php.version,
+      label: "PHP " + php.version + (php.isDefault ? " (default)" : ""),
+      value: php.fpmRunning ? "FPM running" : "FPM stopped",
+      // Only the default version failing stops the machine serving. A second
+      // version with its pool down is a fact, not a fault — this machine idles
+      // with 8.5 stopped and that is not something to colour.
+      level: php.fpmRunning ? "ok" : (php.isDefault ? "down" : "idle")
+    });
+  }
+
+  // Docker being absent is only a fault when something here depends on it —
+  // the same rule summarize() uses to decide whether to raise the issue. A
+  // machine running every service natively should not be told Docker is down.
+  var dockerNeeded = false;
+  for (var d = 0; d < s.services.rows.length; d++) {
+    if (s.services.rows[d].mode === "docker" && s.services.rows[d].installed)
+      dockerNeeded = true;
+  }
+  rows.push({
+    key: "docker",
+    label: "Docker",
+    value: s.docker.available
+      ? s.docker.running + " running" + (s.docker.exited ? " · " + s.docker.exited + " exited" : "")
+      : "unavailable",
+    level: s.docker.available ? "ok" : (dockerNeeded ? "warn" : "idle")
+  });
+
+  rows = rows.concat(envCheckRows(s, "docker"));
+
+  var diag = checksSummary(s);
+  if (diag.total)
+    rows.push({ key: "diagnostics", label: "Diagnostics", value: diag.label, level: diag.level });
+
+  return rows;
+}
+
+// The one-line roll-up of every health check, drawn as the last Environment
+// row. Counting all of them — including the ones with their own line — is
+// deliberate: this row answers "did the doctor pass?", and an answer that
+// silently excluded three checks would be a worse answer than a redundant one.
+function checksSummary(s) {
+  var flags = s && s.env ? s.env.flags : [];
+  var ok = 0;
+  var worst = "ok";
+  for (var i = 0; i < flags.length; i++) {
+    if (flags[i].level === "ok")
+      ok++;
+    else if (flags[i].level === "down")
+      worst = "down";
+    else if (worst === "ok")
+      worst = "warn";
+  }
+  return {
+    total: flags.length,
+    ok: ok,
+    level: worst,
+    label: flags.length ? ok + "/" + flags.length + " passing" : ""
+  };
+}
+
+// A version as it should read on a row. HubDev reports a service version as
+// whatever the provider calls it, which is a number for MySQL ("8.0") and a
+// tag for others ("latest", "alpine", "2025-latest"). Prefixing every one with
+// "v" produced "vlatest" and "valpine" in the panel — so the prefix is only
+// for versions that are actually numbers.
+function versionLabel(version) {
+  var v = str(version);
+  if (!v)
+    return "";
+  return /^[0-9]/.test(v) ? "v" + v : v;
 }
 
 // ------------------------------------------------------------- tooltip ----
