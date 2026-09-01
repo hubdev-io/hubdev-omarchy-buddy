@@ -1,0 +1,109 @@
+.pragma library
+
+// The transport adapter: `hubdev snapshot --json`, spawned by BarWidget.qml.
+//
+// THE SEAM. This file never spawns anything — BarWidget.qml is the only I/O
+// owner (see CLAUDE.md). What lives here is everything about the transport that
+// can be decided without doing it: which argv to build, which tier to ask for,
+// how fast to ask again, and how to turn stdout into a snapshot or a refusal.
+// Swapping the CLI for the Phase 6 loopback daemon is one line in
+// BarWidget.qml — `import "SourceJson.js" as Source` becomes
+// `import "SourceHttp.js" as Source` — provided the replacement exports the
+// same four functions: request(), parse(), intervalFor(), timeoutMs().
+
+var BIN = "hubdev";
+
+// Two tiers, and the expensive one never runs at 5s (plan §4.1, revised by the
+// Phase 0 measurements in §7.2).
+//
+// Measured warm on the dev machine with 5 containers running:
+//   sites 100ms · caddy 115ms · php 342ms  -> cheap, ~560ms total
+//   services 568ms · status 918ms · doctor 1071ms
+// `service:list` probes Docker per service, so it scales with container count,
+// not site count. It was in the plan's cheap tier; it is not cheap.
+var TIERS = {
+  cheap: ["caddy", "php", "sites"],
+  full: ["caddy", "php", "sites", "services", "docker", "health", "tunnels", "backups"]
+};
+
+// What to run for a tier. `kind` is what BarWidget switches on; an HTTP
+// adapter would return { kind: "http", url: ... } and change nothing else.
+function request(tier) {
+  var include = TIERS[tier] || TIERS.full;
+  return {
+    kind: "process",
+    argv: [BIN, "snapshot", "--json", "--include=" + include.join(",")],
+    tier: TIERS[tier] ? tier : "full"
+  };
+}
+
+// Hard timeout per request. Every Process must have one: a verb that escalates
+// falls back to `pkexec`, which raises a polkit dialog and blocks until it is
+// answered (plan §7.1). Reads never escalate, but the timeout is what keeps
+// that true by construction rather than by trust.
+function timeoutMs(tier) {
+  return tier === "cheap" ? 5000 : 15000;
+}
+
+// Turn a completed process into a snapshot or a refusal. Never throws — a
+// widget that throws inside the shell process takes the bar with it.
+function parse(stdout, exitCode) {
+  if (exitCode !== 0) {
+    // 127 is the shell's "not found"; Qt reports a failed spawn as -1 or -2.
+    if (exitCode === 127 || exitCode < 0)
+      return { ok: false, error: "HubDev is not installed" };
+    return { ok: false, error: "HubDev exited with code " + exitCode };
+  }
+
+  var text = typeof stdout === "string" ? stdout.trim() : "";
+  if (!text)
+    return { ok: false, error: "HubDev returned nothing" };
+
+  var doc;
+  try {
+    doc = JSON.parse(text);
+  } catch (e) {
+    // Overwhelmingly means this hubdev predates the contract and printed its
+    // ANSI table instead. Say the useful thing, not "unexpected token <".
+    return { ok: false, error: "This HubDev is too old — `snapshot --json` is not available" };
+  }
+
+  if (!doc || typeof doc !== "object" || Array.isArray(doc))
+    return { ok: false, error: "HubDev returned an unexpected snapshot" };
+
+  return { ok: true, snapshot: doc };
+}
+
+// ------------------------------------------------------------ cadence ----
+
+var IDLE_MS = 30000;
+var OPEN_MS = 5000;
+var BACKOFF_CAP_MS = 60000;
+
+// How long to wait before the next poll.
+//
+//  - open panel  -> 5s, but only the cheap tier (the caller alternates)
+//  - closed      -> 30s
+//  - unreachable -> exponential backoff to 60s, so a machine without HubDev
+//                   installed is not spawning a doomed process every 30s
+//                   forever.
+function intervalFor(state) {
+  var s = state || {};
+  var failures = typeof s.consecutiveFailures === "number" ? s.consecutiveFailures : 0;
+  if (failures > 0) {
+    var backoff = IDLE_MS * Math.pow(2, failures - 1);
+    return Math.min(backoff, BACKOFF_CAP_MS);
+  }
+  return s.open ? OPEN_MS : IDLE_MS;
+}
+
+// Which tier this tick should ask for. The expensive blocks refresh on a 30s
+// wall clock regardless of panel state, so an open panel alternates rather than
+// dragging Docker probes into a 5s loop.
+function tierFor(state) {
+  var s = state || {};
+  if (!s.open)
+    return "full";
+  var since = typeof s.msSinceFullRefresh === "number" ? s.msSinceFullRefresh : 0;
+  return since >= IDLE_MS ? "full" : "cheap";
+}

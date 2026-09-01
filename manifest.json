@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "id": "io.hubdev.buddy",
+  "name": "HubDev Buddy",
+  "version": "0.1.0",
+  "author": "HubDev",
+  "license": "MIT",
+  "description": "The state of your HubDev environment at a glance in the bar: sites, services, PHP versions, Caddy and Docker. Quiet when healthy, obvious when broken.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "HubDev",
+    "description": "One bar mark that gains a coloured dot only when something in the local HubDev environment is wrong.",
+    "category": "Development",
+    "defaultSection": "right",
+    "aliases": ["hubdev", "buddy"],
+    "allowMultiple": false,
+    "defaults": {
+      "refreshIntervalSec": 30,
+      "view": "dense"
+    },
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 5,
+        "max": 600,
+        "step": 5,
+        "defaultValue": 30,
+        "description": "How often to poll HubDev while the panel is closed. The panel itself refreshes faster while open."
+      },
+      {
+        "key": "view",
+        "type": "enum",
+        "label": "Panel layout",
+        "options": ["dense", "columns"],
+        "defaultValue": "dense",
+        "description": "Dense is a compact table; columns is wider and splits sites, services and environment side by side."
+      }
+    ]
+  }
+}

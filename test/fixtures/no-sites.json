@@ -1,0 +1,273 @@
+{
+  "schema": 1,
+  "hubdev": {
+    "version": "1.29.0",
+    "update_available": null
+  },
+  "generated_at": "2026-08-31T23:40:00Z",
+  "caddy": {
+    "running": true,
+    "version": "2.11.4",
+    "mode": "native",
+    "routes": 0
+  },
+  "php": [
+    {
+      "version": "8.5",
+      "default": false,
+      "fpm_running": false,
+      "xdebug": false
+    },
+    {
+      "version": "8.4",
+      "default": true,
+      "fpm_running": true,
+      "xdebug": false
+    }
+  ],
+  "docker": {
+    "available": true,
+    "containers": {
+      "running": 5,
+      "exited": 3
+    },
+    "reclaimable_bytes": 0
+  },
+  "services": [
+    {
+      "name": "mysql",
+      "display": "MySQL",
+      "category": "database",
+      "status": "running",
+      "mode": "docker",
+      "port": 3306,
+      "version": "8.0",
+      "auto_start": true,
+      "installed": true,
+      "external": false,
+      "has_native": true,
+      "has_docker": true
+    },
+    {
+      "name": "postgresql",
+      "display": "PostgreSQL",
+      "category": "database",
+      "status": "running",
+      "mode": "docker",
+      "port": 5432,
+      "version": "16",
+      "auto_start": true,
+      "installed": true,
+      "external": false,
+      "has_native": true,
+      "has_docker": true
+    },
+    {
+      "name": "redis",
+      "display": "Redis",
+      "category": "cache",
+      "status": "running",
+      "mode": "docker",
+      "port": 6379,
+      "version": "alpine",
+      "auto_start": true,
+      "installed": true,
+      "external": false,
+      "has_native": true,
+      "has_docker": true
+    },
+    {
+      "name": "mailpit",
+      "display": "Mailpit",
+      "category": "email",
+      "status": "running",
+      "mode": "docker",
+      "port": 1025,
+      "version": "latest",
+      "auto_start": true,
+      "installed": true,
+      "external": false,
+      "web_url": "http://localhost:8025/",
+      "has_native": true,
+      "has_docker": true
+    },
+    {
+      "name": "meilisearch",
+      "display": "MeiliSearch",
+      "category": "search",
+      "status": "stopped",
+      "mode": "docker",
+      "port": 7700,
+      "version": "latest",
+      "auto_start": false,
+      "installed": false,
+      "external": false,
+      "has_native": true,
+      "has_docker": true
+    },
+    {
+      "name": "minio",
+      "display": "MinIO",
+      "category": "storage",
+      "status": "stopped",
+      "mode": "docker",
+      "port": 9000,
+      "version": "latest",
+      "auto_start": false,
+      "installed": false,
+      "external": false,
+      "has_native": true,
+      "has_docker": true
+    },
+    {
+      "name": "reverb",
+      "display": "Laravel Reverb",
+      "category": "realtime",
+      "status": "stopped",
+      "mode": "native",
+      "port": 8181,
+      "auto_start": true,
+      "installed": false,
+      "external": false,
+      "has_native": true,
+      "has_docker": true
+    },
+    {
+      "name": "sqlserver",
+      "display": "SQL Server",
+      "category": "database",
+      "status": "running",
+      "mode": "docker",
+      "port": 1433,
+      "version": "2025-latest",
+      "auto_start": true,
+      "installed": true,
+      "external": false,
+      "has_native": false,
+      "has_docker": true
+    }
+  ],
+  "sites": [],
+  "health": {
+    "checks": [
+      {
+        "id": "caddy_binary",
+        "level": "ok",
+        "label": "Caddy Binary",
+        "detail": "setcap OK (ports 80/443)"
+      },
+      {
+        "id": "caddy_process",
+        "level": "ok",
+        "label": "Caddy Process",
+        "detail": "Running (admin API on :2019)"
+      },
+      {
+        "id": "php_85",
+        "level": "warn",
+        "label": "PHP 8.5",
+        "detail": "v8.5.9, FPM stopped"
+      },
+      {
+        "id": "php_84",
+        "level": "ok",
+        "label": "PHP 8.4",
+        "detail": "Installed, FPM running"
+      },
+      {
+        "id": "composer",
+        "level": "ok",
+        "label": "Composer",
+        "detail": "v2.10.0"
+      },
+      {
+        "id": "nodejs",
+        "level": "ok",
+        "label": "Node.js",
+        "detail": "v26.2.0"
+      },
+      {
+        "id": "docker",
+        "level": "ok",
+        "label": "Docker",
+        "detail": "v29.7.2"
+      },
+      {
+        "id": "port_80_http",
+        "level": "ok",
+        "label": "Port 80 (HTTP)",
+        "detail": "In use"
+      },
+      {
+        "id": "port_443_https",
+        "level": "ok",
+        "label": "Port 443 (HTTPS)",
+        "detail": "In use"
+      },
+      {
+        "id": "port_3306_mysql",
+        "level": "ok",
+        "label": "Port 3306 (MySQL)",
+        "detail": "In use"
+      },
+      {
+        "id": "port_6379_redis",
+        "level": "ok",
+        "label": "Port 6379 (Redis)",
+        "detail": "In use"
+      },
+      {
+        "id": "port_5432_postgresql",
+        "level": "ok",
+        "label": "Port 5432 (PostgreSQL)",
+        "detail": "In use"
+      },
+      {
+        "id": "hosts_file",
+        "level": "ok",
+        "label": "Hosts File",
+        "detail": "7 HubDev entries"
+      },
+      {
+        "id": "dns_test",
+        "level": "ok",
+        "label": "DNS (.test)",
+        "detail": "Port 80 listening, .test domains should resolve"
+      },
+      {
+        "id": "hubdev_api",
+        "level": "ok",
+        "label": "HubDev API",
+        "detail": "Online"
+      },
+      {
+        "id": "kronnio_api",
+        "level": "ok",
+        "label": "Kronn.io API",
+        "detail": "Online"
+      },
+      {
+        "id": "license",
+        "level": "ok",
+        "label": "License",
+        "detail": "Free plan"
+      },
+      {
+        "id": "disk_usage",
+        "level": "ok",
+        "label": "Disk Usage",
+        "detail": "/home/dev/.local/share/devhub"
+      }
+    ]
+  },
+  "tunnels": [],
+  "backups": {
+    "count": 0,
+    "bytes": 0,
+    "last_at": null
+  },
+  "license": {
+    "plan": "free",
+    "status": "active"
+  }
+}

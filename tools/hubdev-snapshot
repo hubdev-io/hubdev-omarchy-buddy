@@ -1,0 +1,246 @@
+#!/usr/bin/env python3
+"""Reference implementation of `hubdev snapshot --json` (plan §4.1).
+
+NOT A SHIPPING PATH. This exists for two reasons:
+
+  1. Phase 2 (the widget) can be finished and verified end-to-end before Phase 1
+     (the Go CLI change) lands, which is the whole point of running them in
+     parallel against a fixed contract.
+  2. It gives the Go implementation an executable acceptance target. When
+     `hubdev snapshot --json` ships, its output must match this envelope, and
+     `test/fixtures/*.json` must still pass.
+
+It composes the envelope from `hubdev mcp` (stdio JSON-RPC), the Caddy admin API
+on :2019, and `docker ps` — the three machine-readable surfaces that exist today.
+That is deliberately the approach the plan rejects for shipping (§4 approach E /
+G8): it reimplements HubDev's own resolution logic in a second place, where it
+will drift. Fine for a dev shim, wrong to ship.
+
+Never emits a secret: services carry no `password`, the license carries no key.
+"""
+
+import json
+import subprocess
+import sys
+import urllib.request
+
+SCHEMA = 1
+ALL_SECTIONS = ["caddy", "php", "sites", "services", "docker", "health", "tunnels", "backups"]
+
+# Keys that must never reach the wire, whatever HubDev hands us (plan R6).
+FORBIDDEN = {"password", "secret", "token", "api_key", "license_key", "key"}
+
+
+def mcp(tools):
+    """Call the given hubdev MCP tools, returning {tool: parsed_json}."""
+    p = subprocess.Popen(
+        ["hubdev", "mcp"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        text=True, bufsize=1,
+    )
+
+    def send(o):
+        p.stdin.write(json.dumps(o) + "\n")
+        p.stdin.flush()
+
+    def read():
+        while True:
+            line = p.stdout.readline()
+            if not line:
+                return None
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+    send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": "2024-11-05", "capabilities": {},
+        "clientInfo": {"name": "hubdev-buddy-snapshot-shim", "version": "0"}}})
+    read()
+    send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+
+    out = {}
+    for i, tool in enumerate(tools, start=2):
+        send({"jsonrpc": "2.0", "id": i, "method": "tools/call",
+              "params": {"name": tool, "arguments": {}}})
+        reply = read()
+        payload = None
+        if reply:
+            content = reply.get("result", {}).get("content", [])
+            if content:
+                try:
+                    payload = json.loads(content[0].get("text", "null"))
+                except json.JSONDecodeError:
+                    payload = None
+        out[tool] = payload if payload is not None else []
+
+    p.stdin.close()
+    p.terminate()
+    return out
+
+
+def strip_secrets(value):
+    if isinstance(value, dict):
+        return {k: strip_secrets(v) for k, v in value.items() if k.lower() not in FORBIDDEN}
+    if isinstance(value, list):
+        return [strip_secrets(v) for v in value]
+    return value
+
+
+def caddy_routes():
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:2019/config/apps/http/servers", timeout=1) as r:
+            servers = json.load(r) or {}
+        return sum(len(s.get("routes") or []) for s in servers.values())
+    except Exception:
+        return 0
+
+
+def docker_counts():
+    try:
+        out = subprocess.run(
+            ["docker", "ps", "-a", "--format", "{{.State}}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if out.returncode != 0:
+            return None
+        states = [s.strip() for s in out.stdout.splitlines() if s.strip()]
+        return {"running": states.count("running"),
+                "exited": sum(1 for s in states if s != "running")}
+    except Exception:
+        return None
+
+
+def check_id(name):
+    return (name.lower()
+            .replace(" ", "_").replace(".", "").replace("(", "").replace(")", ""))
+
+
+LEVEL = {"ok": "ok", "warning": "warn", "error": "error"}
+
+
+def build(include):
+    want = set(include)
+    tools = ["hubdev_diagnostics"]
+    if "sites" in want:
+        tools.append("hubdev_list_sites")
+    if "services" in want:
+        tools.append("hubdev_list_services")
+    if "php" in want:
+        tools.append("hubdev_list_php_versions")
+    if "tunnels" in want:
+        tools.append("hubdev_list_tunnels")
+
+    data = mcp(tools)
+    diag = data.get("hubdev_diagnostics") or []
+    by_name = {c.get("name", ""): c for c in diag}
+
+    doc = {
+        "schema": SCHEMA,
+        "hubdev": {"version": version(), "update_available": None},
+        "generated_at": subprocess.run(
+            ["date", "-u", "+%Y-%m-%dT%H:%M:%SZ"], capture_output=True, text=True
+        ).stdout.strip(),
+    }
+
+    if "caddy" in want:
+        proc = by_name.get("Caddy Process", {})
+        binary = by_name.get("Caddy Binary", {})
+        running = proc.get("status") == "ok"
+        doc["caddy"] = {
+            "running": running,
+            "version": (binary.get("message") or "").lstrip("v"),
+            "mode": "native",
+            "routes": caddy_routes() if running else 0,
+        }
+
+    if "php" in want:
+        doc["php"] = [
+            {"version": p.get("version", ""),
+             "default": bool(p.get("is_default")),
+             "fpm_running": p.get("fpm_status") == "running",
+             "xdebug": "xdebug" in (p.get("extensions") or [])}
+            for p in (data.get("hubdev_list_php_versions") or [])
+        ]
+
+    if "sites" in want:
+        doc["sites"] = [
+            {"name": s.get("name", ""), "domain": s.get("domain", ""),
+             "path": s.get("path", ""), "driver": s.get("driver", ""),
+             "php_version": s.get("php_version", ""), "mode": s.get("mode", ""),
+             "active": bool(s.get("active")),
+             # PROPOSED fields. The shim cannot compute per-site route presence
+             # or certificate expiry, and guessing would make the widget lie —
+             # so it omits them, and Model.js treats absent as "unknown".
+             "tls": True}
+            for s in (data.get("hubdev_list_sites") or [])
+        ]
+
+    if "services" in want:
+        doc["services"] = strip_secrets(data.get("hubdev_list_services") or [])
+
+    if "docker" in want:
+        counts = docker_counts()
+        doc["docker"] = {
+            "available": counts is not None,
+            "containers": counts or {"running": 0, "exited": 0},
+            "reclaimable_bytes": 0,
+        }
+
+    if "health" in want:
+        doc["health"] = {"checks": [
+            {"id": check_id(c.get("name", "")),
+             "level": LEVEL.get(c.get("status", "ok"), "ok"),
+             "label": c.get("name", ""),
+             "detail": c.get("detail") or c.get("message", "")}
+            for c in diag
+        ]}
+        lic = by_name.get("License", {})
+        doc["license"] = {
+            "plan": (lic.get("message") or "").replace(" plan", "").lower(),
+            "status": "active" if lic.get("status") == "ok" else "inactive",
+        }
+
+    if "tunnels" in want:
+        doc["tunnels"] = [
+            {"site": t.get("site", ""), "url": t.get("public_url", ""), "running": True}
+            for t in (data.get("hubdev_list_tunnels") or [])
+        ]
+
+    if "backups" in want:
+        doc["backups"] = {"count": 0, "bytes": 0, "last_at": None}
+
+    return strip_secrets(doc)
+
+
+def version():
+    try:
+        out = subprocess.run(["hubdev", "--version"], capture_output=True, text=True, timeout=5)
+        return out.stdout.strip().split()[-1].lstrip("v")
+    except Exception:
+        return ""
+
+
+def main(argv):
+    include = ALL_SECTIONS
+    for a in argv[1:]:
+        if a.startswith("--include="):
+            include = [s for s in a.split("=", 1)[1].split(",") if s]
+        elif a in ("--json", "snapshot"):
+            pass
+        elif a in ("-h", "--help"):
+            print(__doc__)
+            return 0
+        else:
+            print("hubdev-snapshot: unknown argument %s" % a, file=sys.stderr)
+            return 2
+    json.dump(build(include), sys.stdout, indent=2)
+    sys.stdout.write("\n")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

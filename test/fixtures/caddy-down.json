@@ -1,0 +1,439 @@
+{
+  "schema": 1,
+  "hubdev": {
+    "version": "1.29.0",
+    "update_available": null
+  },
+  "generated_at": "2026-08-31T23:40:00Z",
+  "caddy": {
+    "running": false,
+    "version": "2.11.4",
+    "mode": "native",
+    "routes": 0
+  },
+  "php": [
+    {
+      "version": "8.5",
+      "default": false,
+      "fpm_running": false,
+      "xdebug": false
+    },
+    {
+      "version": "8.4",
+      "default": true,
+      "fpm_running": true,
+      "xdebug": false
+    }
+  ],
+  "docker": {
+    "available": true,
+    "containers": {
+      "running": 5,
+      "exited": 3
+    },
+    "reclaimable_bytes": 0
+  },
+  "services": [
+    {
+      "name": "mysql",
+      "display": "MySQL",
+      "category": "database",
+      "status": "running",
+      "mode": "docker",
+      "port": 3306,
+      "version": "8.0",
+      "auto_start": true,
+      "installed": true,
+      "external": false,
+      "has_native": true,
+      "has_docker": true
+    },
+    {
+      "name": "postgresql",
+      "display": "PostgreSQL",
+      "category": "database",
+      "status": "running",
+      "mode": "docker",
+      "port": 5432,
+      "version": "16",
+      "auto_start": true,
+      "installed": true,
+      "external": false,
+      "has_native": true,
+      "has_docker": true
+    },
+    {
+      "name": "redis",
+      "display": "Redis",
+      "category": "cache",
+      "status": "running",
+      "mode": "docker",
+      "port": 6379,
+      "version": "alpine",
+      "auto_start": true,
+      "installed": true,
+      "external": false,
+      "has_native": true,
+      "has_docker": true
+    },
+    {
+      "name": "mailpit",
+      "display": "Mailpit",
+      "category": "email",
+      "status": "running",
+      "mode": "docker",
+      "port": 1025,
+      "version": "latest",
+      "auto_start": true,
+      "installed": true,
+      "external": false,
+      "web_url": "http://localhost:8025/",
+      "has_native": true,
+      "has_docker": true
+    },
+    {
+      "name": "meilisearch",
+      "display": "MeiliSearch",
+      "category": "search",
+      "status": "stopped",
+      "mode": "docker",
+      "port": 7700,
+      "version": "latest",
+      "auto_start": false,
+      "installed": false,
+      "external": false,
+      "has_native": true,
+      "has_docker": true
+    },
+    {
+      "name": "minio",
+      "display": "MinIO",
+      "category": "storage",
+      "status": "stopped",
+      "mode": "docker",
+      "port": 9000,
+      "version": "latest",
+      "auto_start": false,
+      "installed": false,
+      "external": false,
+      "has_native": true,
+      "has_docker": true
+    },
+    {
+      "name": "reverb",
+      "display": "Laravel Reverb",
+      "category": "realtime",
+      "status": "stopped",
+      "mode": "native",
+      "port": 8181,
+      "auto_start": true,
+      "installed": false,
+      "external": false,
+      "has_native": true,
+      "has_docker": true
+    },
+    {
+      "name": "sqlserver",
+      "display": "SQL Server",
+      "category": "database",
+      "status": "running",
+      "mode": "docker",
+      "port": 1433,
+      "version": "2025-latest",
+      "auto_start": true,
+      "installed": true,
+      "external": false,
+      "has_native": false,
+      "has_docker": true
+    }
+  ],
+  "sites": [
+    {
+      "name": "sonata",
+      "domain": "sonata.craft",
+      "path": "/home/dev/Projects/Sonata/sonata-web",
+      "driver": "laravel",
+      "php_version": "8.4",
+      "mode": "traditional",
+      "active": true,
+      "tls": true,
+      "route_present": false
+    },
+    {
+      "name": "beacon",
+      "domain": "beacon.lab",
+      "path": "/home/dev/Projects/Beacon/beacon-main-web",
+      "driver": "laravel",
+      "php_version": "8.4",
+      "mode": "traditional",
+      "active": true,
+      "tls": true,
+      "route_present": false
+    },
+    {
+      "name": "ledger",
+      "domain": "ledger.lab",
+      "path": "/home/dev/Projects/Beacon/ledger-app",
+      "driver": "laravel",
+      "php_version": "8.4",
+      "mode": "traditional",
+      "active": true,
+      "tls": true,
+      "route_present": false
+    },
+    {
+      "name": "orchard",
+      "domain": "orchard.lab",
+      "path": "/home/dev/Projects/Orchard/orchard-web-app",
+      "driver": "laravel",
+      "php_version": "8.4",
+      "mode": "traditional",
+      "active": true,
+      "tls": true,
+      "route_present": false
+    },
+    {
+      "name": "invoice-app",
+      "domain": "invoice-app.test",
+      "path": "/home/dev/Projects/Beacon/invoice-app",
+      "driver": "laravel",
+      "php_version": "8.4",
+      "mode": "traditional",
+      "active": false,
+      "tls": true,
+      "route_present": false
+    },
+    {
+      "name": "clinic-portal-app",
+      "domain": "clinic-portal-app.test",
+      "path": "/home/dev/Projects/Clinic/clinic-portal-app",
+      "driver": "laravel",
+      "php_version": "8.4",
+      "mode": "traditional",
+      "active": true,
+      "tls": true,
+      "route_present": false
+    },
+    {
+      "name": "wallet-app",
+      "domain": "wallet-app.test",
+      "path": "/home/dev/Projects/Wallet/wallet-app",
+      "driver": "laravel",
+      "php_version": "8.4",
+      "mode": "traditional",
+      "active": true,
+      "tls": true,
+      "route_present": false
+    },
+    {
+      "name": "dispatch",
+      "domain": "dispatch.lab",
+      "path": "/home/dev/Projects/Dispatch/dispatch-app",
+      "driver": "laravel",
+      "php_version": "8.4",
+      "mode": "traditional",
+      "active": true,
+      "tls": true,
+      "route_present": false
+    },
+    {
+      "name": "hydrant",
+      "domain": "hydrant.lab",
+      "path": "/home/dev/Projects/Hydrant/hydrant-app",
+      "driver": "laravel",
+      "php_version": "8.4",
+      "mode": "traditional",
+      "active": true,
+      "tls": true,
+      "route_present": false
+    },
+    {
+      "name": "museum-wp",
+      "domain": "museum-wp.test",
+      "path": "/home/dev/Projects/Museum/wp-app",
+      "driver": "generic",
+      "php_version": "8.4",
+      "mode": "traditional",
+      "active": true,
+      "tls": true,
+      "route_present": false
+    },
+    {
+      "name": "clinic",
+      "domain": "clinic.lab",
+      "path": "/home/dev/Projects/Clinic/clinic-app",
+      "driver": "laravel",
+      "php_version": "8.4",
+      "mode": "traditional",
+      "active": true,
+      "tls": true,
+      "route_present": false
+    },
+    {
+      "name": "summit",
+      "domain": "summit.lab",
+      "path": "/home/dev/Projects/Summit/summit-pin",
+      "driver": "laravel",
+      "php_version": "8.4",
+      "mode": "traditional",
+      "active": true,
+      "tls": true,
+      "route_present": false
+    },
+    {
+      "name": "harbor-pin",
+      "domain": "harbor-pin.lab",
+      "path": "/home/dev/Projects/Harbor/harbor-pin-app",
+      "driver": "laravel",
+      "php_version": "8.4",
+      "mode": "traditional",
+      "active": true,
+      "tls": true,
+      "route_present": false
+    },
+    {
+      "name": "hubdev",
+      "domain": "hubdev.test",
+      "path": "/home/dev/Projects/HubDev/hubdev-api",
+      "driver": "laravel",
+      "php_version": "8.4",
+      "mode": "traditional",
+      "active": true,
+      "tls": true,
+      "route_present": false
+    },
+    {
+      "name": "terminal-radio",
+      "domain": "terminal-radio.test",
+      "path": "/home/dev/Projects/Research/terminal-radio/web",
+      "driver": "laravel",
+      "php_version": "8.4",
+      "mode": "traditional",
+      "active": true,
+      "tls": true,
+      "route_present": false
+    }
+  ],
+  "health": {
+    "checks": [
+      {
+        "id": "caddy_binary",
+        "level": "ok",
+        "label": "Caddy Binary",
+        "detail": "setcap OK (ports 80/443)"
+      },
+      {
+        "id": "caddy_process",
+        "level": "error",
+        "label": "Caddy Process",
+        "detail": "Not running"
+      },
+      {
+        "id": "php_85",
+        "level": "warn",
+        "label": "PHP 8.5",
+        "detail": "v8.5.9, FPM stopped"
+      },
+      {
+        "id": "php_84",
+        "level": "ok",
+        "label": "PHP 8.4",
+        "detail": "Installed, FPM running"
+      },
+      {
+        "id": "composer",
+        "level": "ok",
+        "label": "Composer",
+        "detail": "v2.10.0"
+      },
+      {
+        "id": "nodejs",
+        "level": "ok",
+        "label": "Node.js",
+        "detail": "v26.2.0"
+      },
+      {
+        "id": "docker",
+        "level": "ok",
+        "label": "Docker",
+        "detail": "v29.7.2"
+      },
+      {
+        "id": "port_80_http",
+        "level": "ok",
+        "label": "Port 80 (HTTP)",
+        "detail": "In use"
+      },
+      {
+        "id": "port_443_https",
+        "level": "ok",
+        "label": "Port 443 (HTTPS)",
+        "detail": "In use"
+      },
+      {
+        "id": "port_3306_mysql",
+        "level": "ok",
+        "label": "Port 3306 (MySQL)",
+        "detail": "In use"
+      },
+      {
+        "id": "port_6379_redis",
+        "level": "ok",
+        "label": "Port 6379 (Redis)",
+        "detail": "In use"
+      },
+      {
+        "id": "port_5432_postgresql",
+        "level": "ok",
+        "label": "Port 5432 (PostgreSQL)",
+        "detail": "In use"
+      },
+      {
+        "id": "hosts_file",
+        "level": "ok",
+        "label": "Hosts File",
+        "detail": "7 HubDev entries"
+      },
+      {
+        "id": "dns_test",
+        "level": "ok",
+        "label": "DNS (.test)",
+        "detail": "Port 80 listening, .test domains should resolve"
+      },
+      {
+        "id": "hubdev_api",
+        "level": "ok",
+        "label": "HubDev API",
+        "detail": "Online"
+      },
+      {
+        "id": "kronnio_api",
+        "level": "ok",
+        "label": "Kronn.io API",
+        "detail": "Online"
+      },
+      {
+        "id": "license",
+        "level": "ok",
+        "label": "License",
+        "detail": "Free plan"
+      },
+      {
+        "id": "disk_usage",
+        "level": "ok",
+        "label": "Disk Usage",
+        "detail": "/home/dev/.local/share/devhub"
+      }
+    ]
+  },
+  "tunnels": [],
+  "backups": {
+    "count": 0,
+    "bytes": 0,
+    "last_at": null
+  },
+  "license": {
+    "plan": "free",
+    "status": "active"
+  }
+}

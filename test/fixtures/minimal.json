@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "hubdev": {
+    "version": "1.29.0"
+  },
+  "generated_at": "2026-08-31T23:40:00Z",
+  "caddy": {
+    "running": true,
+    "version": "2.11.4",
+    "mode": "native"
+  },
+  "php": [
+    {
+      "version": "8.4",
+      "default": true,
+      "fpm_running": true
+    }
+  ],
+  "services": [],
+  "sites": []
+}
