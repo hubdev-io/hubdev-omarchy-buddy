@@ -1,9 +1,13 @@
 # HubDev Buddy — Omarchy Quattro plugin
 
-**Implementation plan (draft)** · 2026-08-31 · **revised 2026-08-31, post-upgrade**
-Status: **unblocked** — Omarchy Quattro is running on this machine. `omarchy plugin` exists,
-`~/.config/omarchy/plugins/` is empty, and no code is written yet. Nothing in this plan is
-waiting on the platform any more; Phase 0 can run today.
+**Implementation plan** · 2026-08-31 · **revised 2026-08-31, post-upgrade** ·
+**Phase 0 complete 2026-08-31**
+Status: **Phase 0 done, Phase 2 is next.** Omarchy Quattro is running here, and the readiness
+spike has been *run*, not reasoned about: a third-party plugin at
+`~/.config/omarchy/plugins/io.hubdev.spike/` drives `Quickshell.Io.Process` against the
+`hubdev` CLI and renders the live site count in the bar. R1 is closed, R2 is re-measured under
+load (and forced a tiering revision, §7.2), and R3 turned out to be a *different* risk than
+the one written down (§7.1). Nothing is waiting on the platform.
 
 Reference implementation: `lerd Glance` (`~/Projects/Research/lerd-omarchy-glance`)
 HubDev CLI source: `~/Projects/HubDev/devhub-go` (Go 1.25, Wails + Svelte GUI)
@@ -277,7 +281,7 @@ rule, and it is the right one.
 
 | Row | Verbs | CLI |
 |---|---|---|
-| Site | open · start · stop · fix · folder · terminal | `site:open` `site:start` `site:stop` `site:fix` |
+| Site | open · start · stop · folder · terminal | `site:open` `site:start` `site:stop` |
 | Service | start · stop · restart | `service:start\|stop\|restart` |
 | PHP row | start/stop FPM | `php:start\|stop <ver>` |
 | Caddy row | start · stop | `caddy:start\|stop` |
@@ -291,6 +295,9 @@ rule, and it is the right one.
 - `php:install` / `node:install` / `marketplace:*` / `security:scan` — long downloads.
 - `site:logs` / `service:logs` — logs leak tokens into a bar panel. Open a terminal instead.
 - Anything under `mcp:*`.
+- **`site:fix`** — cut after Phase 0. It calls `chmod` outside HubDev's sudoers rule, so it
+  can raise a polkit dialog that blocks the `Process`, and only *conditionally* (when the FPM
+  socket mode is already wrong), which is the worst kind of escalation to allowlist. §7.1.
 
 The escape hatches are **Open HubDev GUI** and **Open terminal at site** (`site:open-terminal`),
 which is honest about where that work belongs.
@@ -355,42 +362,123 @@ are hand-written first from the `hubdev mcp` output that already exists, committ
 both sides converge on them. The plugin can be feature-complete and fully tested before
 `hubdev snapshot --json` exists — which is what makes R4 survivable.
 
-Rough sizing, in focused sessions rather than calendar time: **P0** 1 · **P1** 1–2 (HubDev
+Rough sizing, in focused sessions rather than calendar time: **P0** ~~1~~ **done** · **P1** 1–2 (HubDev
 repo — revised down, see §3.1) · **P2** 2 · **P3** 3–4 · **P4** 2–3 · **P5** 1.
 
-### Phase 0 — Readiness spike *(unblocked — Quattro is running)*
+### Phase 0 — Readiness spike ✅ *(complete — 2026-08-31)*
 
-Verification only. Everything downstream assumes these answers. Three of the seven are now
-answered from the installed shell and the CLI source; the spike is correspondingly smaller,
-but it should still be *run*, because reading a validator is not the same as loading a plugin.
+**Run on this machine, not reasoned about.** The spike shipped as a real third-party plugin at
+`~/.config/omarchy/plugins/io.hubdev.spike/` (`manifest.json` + `BarWidget.qml`, ~70 lines),
+`omarchy plugin enable io.hubdev.spike right`, and **`15` — the live site count from
+`hubdev site:list` — rendered in the Quattro bar.** Both exit criteria met.
 
-- [x] ~~`omarchy plugin clone omarchy.clock --edit` works; scaffold understood.~~ **The
-      command exists** (`omarchy plugin add|clone|enable|disable|list|remove|update|validate`).
-      Still worth doing once to see the scaffold.
-- [x] ~~**Can a plugin import `Quickshell.Io` and use `Process`?**~~ **Answered from the
-      installed shell: yes.** `/usr/lib/qt6/qml/Quickshell/Io/` is present;
-      `PluginRegistry.qml` filters *entry-point paths*, not imports — its "sandbox" is path
-      containment, and there is no import allowlist anywhere in the loader; and the
-      first-party `bar-widget` `omarchy.agents` imports `Quickshell.Io` and runs `Process`
-      (§4). The docs' `QtQuick`/`Quickshell`/`qs.Ui`/`qs.Commons` list is what plugins are
-      *documented* against, not what the shell enforces. **Approach A stands; the pivot to B
-      is off the table.** Confirm with the smoke test below before building on it.
-- [ ] `qmllint -I "$OMARCHY_PATH/shell"` runs clean on the scaffold.
-- [ ] Which `hubdev` verbs can trigger a sudo prompt (read `/etc/sudoers.d/*`, and test each
-      candidate verb with `sudo -k` set). **Still fully open, and now the highest-value
-      unknown left** — it is what bounds the Phase 4 allowlist (R3, G11).
-- [x] ~~Does `hubdev status` take a lock on the config directory?~~ **Answered from source:
-      no.** No file locking exists in `devhub-go`; concurrency is in-process `sync.RWMutex`.
-      Polling reads are safe. *(Writes remain last-writer-wins against the GUI — see §3.1.)*
-- [ ] Latency of `status` / `docker:ps` with all services **running**, not stopped.
+- [x] ~~`omarchy plugin clone omarchy.clock --edit` works; scaffold understood.~~ **Done.**
+      The scaffold that matters is `shell/plugins/bar/widgets/SystemUpdate.qml` — 60 lines,
+      and the exact shape Buddy needs: `BarWidget` base from `qs.Ui`, `Process` +
+      `Timer(triggeredOnStart)`, `BarIconButton` with `tooltipText`, `IpcHandler` for
+      `refresh`/`clear`. Copy that, not the 32 KB `agents/Panel.qml`.
+- [x] ~~**Can a plugin import `Quickshell.Io` and use `Process`?**~~ **Confirmed live, twice.**
+      The spike does it. And a *third-party* plugin already shipping on this machine —
+      `bobbynicholas.omaland` — imports `Quickshell.Io`, `Quickshell.Wayland`, `qs.Ui` and
+      `qs.Commons` today. The import question is settled where it actually matters.
+      **Approach A stands. R1 is closed, not merely argued.**
+- [x] **`qmllint -I /usr/share/omarchy/shell` runs clean** on the spike — exit 0, no output.
+      `omarchy plugin validate` exit 0. Both belong in CI (Phase 5) exactly as written.
+- [x] **Which `hubdev` verbs can trigger a password prompt.** **Answered — and the threat
+      model was wrong.** See §7.1 below; it changes the Phase 4 allowlist.
+- [x] ~~Does `hubdev status` take a lock on the config directory?~~ **No** (from source).
+- [x] **Latency with services running.** Measured with 5 containers up. See §7.2 — it
+      invalidates the plan's own tiering.
+- [x] **Hot reload works.** Saving QML inside the plugin folder logs
+      `Local plugin changed, reloading: io.hubdev.spike` and re-renders with no restart and
+      no `rescanPlugins`. The §8 dev loop is correct as written.
+
+#### 7.1 The sudo answer — the risk is `pkexec`, not a terminal prompt
+
+`/etc/sudoers.d/devhub` **is installed** on this machine (marker
+`~/.local/share/devhub/config/sudoers-installed` = `1`, matching `sudoersRuleVersion`).
+`sudo -k; sudo -n -l` returns exit 0 and lists the rule, so this is not a cached timestamp.
+
+`platform.RunPrivileged()` (`internal/platform/privilege_linux.go`) is the only escalation
+path, and it does exactly two things:
+
+1. `sudo -n <args>` when the marker is present — **`-n` never prompts**; it fails fast.
+2. On failure, **`pkexec <args>`** — a GUI polkit dialog, served by the `omarchy.polkit`
+   plugin in this very shell.
+
+**So R3's stated failure mode does not exist.** A QML `Process` can never hit a hidden
+terminal password prompt. What it *can* hit is rung 2: a polkit dialog that is visible but
+blocks the `Process` until answered or dismissed (`pkexec` exits 126 on cancel). Still
+unacceptable in a bar widget, still a hard timeout, but a different — and milder — bug.
+
+The rule grants NOPASSWD on: `systemctl start|stop|restart|enable|cat *`, `pacman -S|-Rns *`,
+`apt-get`/`dnf` install/remove, `mysql *`, `setcap *`, `certutil *`, `update-alternatives *`,
+`sudo -u postgres *`, `ln -sf *`, and **`bash -c *`**.
+
+**Verdict for the Phase 4 allowlist:**
+
+| Verb | Escalates? | Verdict |
+|---|---|---|
+| `service:start\|stop\|restart` (native) | `bash -c` script + `systemctl stop` — both NOPASSWD | ✅ **allow** |
+| `service:*` (docker mode) | no `RunPrivileged` in the docker provider | ✅ **allow** |
+| `caddy:start\|stop`, `php:start\|stop` | `systemctl` — NOPASSWD | ✅ **allow** |
+| `site:fix` | `RunPrivileged("chmod","0666",sock)` — **`chmod` is not in the rule** → `pkexec` | ❌ **exclude** |
+| anything touching cert trust | `RunPrivileged(binPath,"trust")` — not in the rule → `pkexec` | ❌ **exclude** |
+
+`site:fix` is the precise case §5.4 warned about: it escalates **conditionally** (only when the
+FPM socket's mode is already wrong), so it passes every manual test until the day it doesn't.
+**Drop it from §5.3's Site row.** The remaining verbs there — open · start · stop · folder ·
+terminal — are unaffected.
+
+> **Aside, worth raising in `devhub-go` on its own merits.** `NOPASSWD: /usr/bin/bash -c *`
+> is unrestricted passwordless root: any process running as this user can
+> `sudo bash -c '<anything>'` silently. It is functionally `NOPASSWD: ALL` written long-hand,
+> and it is the rule HubDev installs on every Linux machine it touches. Narrowing it does not
+> block this plugin — every verb Buddy wants is already covered by the `systemctl` line — but
+> it is a real finding, in your own product, surfaced by this spike.
+
+#### 7.2 Latency under load — the plan's "cheap tier" is wrong
+
+Re-measured with 5 docker services running (MySQL, PostgreSQL, Redis, Mailpit, SQL Server),
+warm, in ms:
+
+| Command | stopped (old) | **running (now)** | |
+|---|---|---|---|
+| `site:list` | 59 | **100** | config read |
+| `caddy:status` | — | **115** | |
+| `php:list` | — | **342** | |
+| `service:list` | 87 | **568** | ⚠️ **6.5×** — probes Docker per service |
+| `status` | 374 | **918** | 2.5× |
+| `doctor` | — | **1071** | |
+
+Naive fan-out is **~3.1 s**. §4.1 put `services` in the *cheap* tier at 5 s open — that is
+wrong: `service:list` is the second most expensive call on the machine and it scales with
+container count, not site count. **Revise the tiering:**
+
+- **cheap** (`caddy,php,sites` ≈ 560 ms): 30 s closed / 5 s open.
+- **expensive** (`services,docker,health,backups`): 30 s regardless, plus once on panel open.
+
+This also raises the value of the §4.1 server-side TTL cache from "nice" to "load-bearing",
+and it is the strongest argument yet for one aggregate `snapshot` call over seven spawns.
+
+#### 7.3 Not our bug — remember this one
+
+Enabling any plugin rebuilds every bar slot, which re-runs `Bar.qml`'s `injectProps()`. If the
+layout contains a `"type": "command"` module (this machine has one, `tunnel`), the shell logs:
+
+```
+WARN scene: @plugins/bar/Bar.qml[1770]: TypeError: Cannot assign to read-only property "moduleName"
+```
+
+`CustomCommandModule` declares `readonly property string moduleName` (`Bar.qml:1548`, `:1784`)
+while `injectProps` assigns to it. **Pre-existing Omarchy bug, harmless, unrelated to us** —
+recorded here so it is not mistaken for a Buddy regression later.
+
+#### 7.4 Still open
+
 - [ ] Does Quickshell expose bar visibility / session idle, so polling can be suspended?
-      Start from `omarchy.agents`' `activation: "on-demand"` and its `Timer` usage.
-
-**Deliverable:** a throwaway widget showing the site count from `hubdev site:list`, installed
-as a real third-party plugin at `~/.config/omarchy/plugins/io.hubdev.spike/` — not a
-first-party one — so the import question is answered where it actually matters.
-**Exit criteria:** `omarchy plugin validate` passes, and a number, from `hubdev`, appears in
-the Quattro bar.
+      Start from `omarchy.agents`' `activation: "on-demand"` — the manifest key is real and
+      documented by example, but what the shell does with it is not yet read.
 
 ### Phase 1 — The JSON contract *(HubDev CLI, ships independently)*
 
@@ -486,9 +574,9 @@ so it refuses exactly what the running shell would refuse.
 
 | | Risk | Mitigation |
 |---|---|---|
-| R1 | ~~**`Process` may not be available to plugins.** Kills approach A.~~ **Largely closed** (§7 P0): the loader enforces no import allowlist and a first-party `bar-widget` already uses `Quickshell.Io`/`Process`. | Residual risk is only that a *third-party* plugin behaves differently — settled by the Phase 0 smoke test, which is now a confirmation rather than a coin flip. The A' and B rungs stay documented as insurance, not as the expected path. |
-| R2 | Poll cost grows with running containers; `status` was already 374ms *stopped*. | One aggregate call · `--include` tiers · TTL cache in `hubdev` · coalescing · suspend when hidden. Re-measure in Phase 0 under load. |
-| R3 | A verb prompts for sudo and hangs the shell process invisibly. | Enumerate escalating verbs in Phase 0; exclude them from the allowlist. Hard timeout on every `Process`. |
+| R1 | ~~**`Process` may not be available to plugins.** Kills approach A.~~ **CLOSED 2026-08-31.** | The Phase 0 spike does it, live, as a third-party plugin (§7 P0) — and `bobbynicholas.omaland`, an unrelated third-party plugin already installed here, imports `Quickshell.Io` too. No residual risk. The A'/B rungs remain documented only as insurance against a future tightening of the plugin API. |
+| R2 | Poll cost grows with running containers. **Re-measured under load (§7.2) and worse than assumed: `service:list` 87ms → 568ms, `status` 374ms → 918ms, naive fan-out ~3.1s.** | Confirmed real, and it moved `services` out of the cheap tier: **cheap** (`caddy,php,sites` ≈560ms) 30s/5s · **expensive** (`services,docker,health,backups`) 30s only. One aggregate call · TTL cache — now load-bearing, not a nicety · coalescing · suspend when hidden. |
+| R3 | ~~A verb prompts for sudo and hangs the shell process **invisibly**.~~ **Re-scoped 2026-08-31 (§7.1): the invisible-prompt mode does not exist.** `RunPrivileged` only ever runs `sudo -n` (never prompts) then falls back to `pkexec` — a *visible* polkit dialog that still blocks the `Process`. | Enumerated: `service:*`, `caddy:start\|stop`, `php:start\|stop` are all NOPASSWD-covered and safe. **`site:fix` is excluded** — it calls `chmod` outside the sudoers rule, and only *conditionally*, so it passes every manual test until it doesn't. Hard timeout on every `Process` regardless. |
 | R4 | The contract lands late relative to the plugin. *(Downgraded: the CLI source is fully available and cloned at `~/Projects/HubDev/devhub-go`. This is a scheduling risk, not an access one — and with v1.28.0 shipping without `snapshot`, it is the risk most likely to set the v1 date.)* | Phases 1 and 2 run in parallel against committed fixtures, so neither blocks the other. `SourceFiles.js` remains as a spike-only fallback, not a shipping path. |
 | R5 | Quattro plugin API is young; `schemaVersion 1` may move. | Now running Omarchy 4.0.2-1, where the validator requires `schemaVersion` to be exactly the JSON number `1`. Pin it, run `omarchy plugin validate` in CI, and re-check on every Omarchy release — the API is young enough that a `2` is a question of when. |
 | R6 | Secrets on screen: `services.yml` passwords, `license.json` key, tokens in logs. | Strip at the contract; no log surfaces in v1; a test that greps rendered strings for known secrets. |
@@ -595,10 +683,14 @@ rather than rhetorical: the widget deliberately **refuses** `site:new`, `backup:
 terminal, with explicit escape hatches to both.
 
 ### ◻︎ G11 — "A sudo prompt inside a QML `Process` hangs the shell with no visible cause."
-**Verdict: already gated, and it is the right severity.** `sudo -n` fails on this machine
-today, and HubDev has installed a sudoers rule whose contents could not be read without a
-password. Phase 0 enumerates every escalating verb; any verb that can escalate is excluded
-from the allowlist *regardless of how useful it is*, plus a hard timeout on every `Process`.
+**Verdict: the severity was right, the mechanism was wrong — and Phase 0 settled it.**
+`sudo -n -l` *does* work here (the earlier failure was a cleared timestamp, not a missing
+rule), and reading `privilege_linux.go` shows `RunPrivileged` never runs an interactive
+`sudo`: it is `sudo -n` (fails fast, never prompts) then `pkexec` (a **visible** polkit
+dialog). So the hang is real but not silent. §7.1 enumerates the verbs; `site:fix` is the one
+casualty, excluded because it escalates *conditionally*. Hard timeout on every `Process` stays.
+The spike also turned up a finding for `devhub-go` itself: the rule grants
+`NOPASSWD: /usr/bin/bash -c *`, which is passwordless root written long-hand.
 
 ### ◻︎ G12 — "No QML is tested. At all."
 **Verdict: accepted, deliberately — same trade lerd makes.** Every rule worth getting wrong
@@ -628,11 +720,16 @@ this plugin introduces, but the plugin makes it easier to hit.
 installed, the loader has no import allowlist, and `omarchy.agents` does exactly this from a
 `bar-widget` today. The plan no longer has a single-point failure that could halve it.
 
-**What carries it now is smaller and more ordinary: the sudo enumeration (R3/G11).** It does
-not threaten the architecture, only the size of the Phase 4 allowlist — a verb that can
-escalate is dropped no matter how useful, and a verb that escalates *unexpectedly* hangs the
-shell process invisibly. It is the one Phase 0 item that cannot be answered by reading source,
-because it depends on a sudoers rule this machine will not disclose without a password.
+~~**What carries it now is the sudo enumeration (R3/G11).**~~ **Done — see §7.1.** It cost the
+plan exactly one verb (`site:fix`) and downgraded the failure mode from *silent hang* to
+*visible blocking dialog*. The architecture is untouched.
+
+**What Phase 0 put in its place is R2.** Measured under load, a naive fan-out is ~3.1s and
+`service:list` alone is 568ms and scales with container count. The tiering in §4.1 was wrong
+about which calls are cheap, and the TTL cache is no longer optional. Nothing here threatens
+the design — the aggregate `snapshot` call is precisely the fix — but it means a v1 built on
+seven separate spawns would have felt bad on this machine, and it is the number to re-check
+whenever the panel gains a section.
 
 Second, and unchanged: **the contract does not exist yet.** v1.28.0 has no `snapshot --json`,
 so Phase 2 runs against hand-written fixtures exactly as G1 forced it to. That is a schedule
