@@ -3,9 +3,9 @@
 > The state of your [HubDev](https://hubdev.io) environment at a glance in the Omarchy
 > Quattro bar. Sites, services, PHP versions, Caddy and Docker — without raising the GUI.
 
-**Status: Phases 0–3 complete, the first three actions ship, and the panel filters as you
-type and drives from the keyboard. The widget runs in the bar, the contract it reads exists,
-clicking it opens the panel, and a site row hands you the project.**
+**Status: Phases 0–3 complete, the first three actions ship, the panel filters as you type
+and drives from the keyboard, and a key summons it. The widget runs in the bar, the contract
+it reads exists, and a site row hands you the project.**
 
 Omarchy **Quattro 4.0.2-1** (Quickshell 0.3.1). `io.hubdev.buddy` is installed and rendering:
 a mark that stays quiet when the environment is healthy, gains an **amber dot** when something
@@ -50,6 +50,34 @@ no matter which device put it there. The cursor is a *key* (`site:<name>`), neve
 the snapshot refreshes underneath the panel every few seconds and a search re-ranks the list on
 every keystroke, so an index would quietly come to mean a different row — the worst possible
 bug for a control that runs things.
+
+**Bind it to a key.** The panel is reachable without going to the bar at all:
+
+```bash
+omarchy-shell shell toggle io.hubdev.buddy
+```
+
+In `~/.config/hypr/bindings.lua`, alongside Omarchy's own panel keys:
+
+```lua
+o.bind("SUPER + CTRL + J", "HubDev Buddy", "omarchy-shell shell toggle io.hubdev.buddy")
+```
+
+`shell toggle` is deliberate rather than this plugin's own IPC route: it resolves the widget
+through `Bar.pickPanelSlot`, so on a multi-monitor desk the panel opens on the output Hyprland
+has focused instead of on every head at once. It lands on the current workspace because the
+bar is a layer surface and has no workspace of its own. The panel takes the keyboard as it
+maps, so a summon runs straight into the search box — press the key, type three letters of a
+project, `Enter`.
+
+That route was dead until Phase 4d, for one reason worth writing down. `Bar.findPanelWidget`
+and `Bar.panelNavigationSlots` both skip any bar slot whose item is missing `open()`, `close()`
+**or `opened`** — and it is the *widget root* they inspect, not the panel. This widget called
+that property `panelOpen`, which is a name, not a bug, and so nothing ever reported it. It
+cost four things: `shell toggle` answered `unknown`; Buddy was left out of the
+`SUPER+CTRL+<n>` panel numbering, which does not leave a gap but renumbers every panel to its
+right; `Tab`, wired to `bar.switchPanelFrom` since Phase 3, could never find its own slot; and
+the popout hand-off had no `popoutSwitchClosing` to read. Renaming it fixed all four.
 
 **`hubdev snapshot --json` is implemented** in HubDev's own CLI, and the widget's
 `SourceJson.parse()` → `Model.summarize()` reduces its live output to `level: ok`,

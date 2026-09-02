@@ -21,7 +21,27 @@ BarWidget {
   // ---------------------------------------------------------------- state --
   readonly property var summary: internal.summary
   readonly property string level: internal.summary.level
-  readonly property bool panelOpen: panelLoader.item ? panelLoader.item.opened === true : false
+
+  // SHAPE CONTRACT. `Bar.findPanelWidget` and `Bar.panelNavigationSlots` both
+  // skip any slot whose activeItem is missing `open()`, `close()` or `opened`
+  // — and it is the *widget root* they look at, not the panel. This property
+  // was called `panelOpen` until Phase 4d, which quietly cost four things:
+  //
+  //   - `omarchy-shell shell toggle io.hubdev.buddy` answered "unknown", so
+  //     there was no way to bind the panel to a key at all;
+  //   - Buddy was left out of the SUPER+CTRL+<n> panel numbering, which does
+  //     not leave a gap — it renumbers every panel to its right;
+  //   - the Tab key, wired to `bar.switchPanelFrom` since Phase 3, could never
+  //     find its own slot and so did nothing;
+  //   - and nothing reported any of it, because the contract is a name.
+  readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
+
+  // Forwarded for the same reason. `Bar.requestPopout` prefers
+  // `closeForPopoutSwitch` over `close`, and KeyboardPanel reads
+  // `popoutSwitchClosing` back off its *owner* — which Panel.qml sets to this
+  // widget (`owner: root.hostWidget`), not to itself.
+  readonly property bool popoutSwitchClosing: panelLoader.item
+    ? panelLoader.item.popoutSwitchClosing === true : false
 
   QtObject {
     id: internal
@@ -42,9 +62,18 @@ BarWidget {
 
   // ----------------------------------------------------------------- panel --
 
+  // Refresh before showing anything, so the panel opens onto current numbers
+  // rather than however old the last poll was. It lives here rather than in the
+  // click handler because clicking the mark is no longer the only way in: a
+  // keybind is, and that is the entry point that most wants fresh numbers,
+  // since summoning the panel from another workspace is how you go and check on
+  // something. Coalesced, so a summon during an in-flight poll is a no-op
+  // rather than a second spawn.
   function open() {
-    if (panelLoader.item)
-      panelLoader.item.open();
+    if (!panelLoader.item)
+      return;
+    root.refresh("full");
+    panelLoader.item.open();
   }
 
   function close() {
@@ -53,8 +82,40 @@ BarWidget {
   }
 
   function toggle() {
-    if (panelLoader.item)
-      panelLoader.item.toggle();
+    if (root.opened)
+      root.close();
+    else
+      root.open();
+  }
+
+  // Run one of open/close/toggle on the single instance the shell would pick:
+  // the widget on the output Hyprland has focused. `summonBarWidget` and its
+  // pair resolve that through `Bar.pickPanelSlot`, which is exactly what
+  // `omarchy-shell shell toggle <id>` goes through — so a keybind and this
+  // route cannot disagree about which screen the panel belongs on.
+  //
+  // Note what that means when the panel is already open on the *other* head:
+  // pickPanelSlot prefers an open instance over the focused one, so the first
+  // press closes the stray and the second opens it here. That is what every
+  // first-party panel does with SUPER+CTRL+<letter>, and matching them is worth
+  // more than being cleverer than them.
+  function runOnFocused(verb) {
+    var host = root.bar;
+    if (host && typeof host.summonBarWidget === "function") {
+      if (verb === "close" || (verb === "toggle" && host.isBarWidgetOpen(root.moduleName)))
+        host.hideBarWidget(root.moduleName);
+      else
+        host.summonBarWidget(root.moduleName);
+      return;
+    }
+    // No bar host to route through yet. Acting on this instance is at least a
+    // real answer; doing nothing would make the route look broken.
+    if (verb === "open")
+      root.open();
+    else if (verb === "close")
+      root.close();
+    else
+      root.toggle();
   }
 
   // The one write this widget performs, and it is deliberately the cheapest
@@ -136,7 +197,7 @@ BarWidget {
 
   function pollState() {
     return {
-      open: root.panelOpen,
+      open: root.opened,
       consecutiveFailures: internal.consecutiveFailures,
       msSinceFullRefresh: root.msNow() - internal.lastFullRefreshMs
     };
@@ -279,19 +340,22 @@ BarWidget {
       root.broadcast("refresh");
     }
 
-    // The panel exists once per monitor, so these are broadcast too — summoning
-    // it on one screen and leaving the other stale would be worse than not
-    // having the route at all.
+    // Summoning goes to exactly one instance, and broadcasting was wrong for
+    // it: on two monitors the old route opened the panel on both heads, which
+    // is not an answer to "show me this" — you can only look at one of them.
+    // Refresh above stays broadcast for the opposite reason: every bar shows
+    // the mark, so leaving one head on older numbers than it has is a real
+    // difference the user can see.
     function open(): void {
-      root.broadcast("open");
+      root.runOnFocused("open");
     }
 
     function close(): void {
-      root.broadcast("close");
+      root.runOnFocused("close");
     }
 
     function toggle(): void {
-      root.broadcast("toggle");
+      root.runOnFocused("toggle");
     }
   }
 
@@ -318,13 +382,12 @@ BarWidget {
       }
     }
 
-    // Refresh first so the panel opens onto current numbers rather than
-    // however old the last poll was, then toggle. The refresh is coalesced, so
-    // a click during an in-flight poll is a no-op rather than a second spawn.
+    // Deliberately this instance's toggle rather than the focused-output route:
+    // a click has already said which screen it means. The refresh that used to
+    // sit here moved into open(), so every way in gets it.
     onPressed: function (buttonCode) {
       if (buttonCode !== Qt.LeftButton)
         return;
-      root.refresh("full");
       root.toggle();
     }
   }

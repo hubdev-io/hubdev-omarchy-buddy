@@ -303,6 +303,10 @@ columns (~760px), following lerd's proportions. Empty sections are not drawn.
 7. **Keyboard cursor** *(added 2026-09-02, Phase 4c)* — arrows walk the site rows and their
    actions; Enter/Space presses what the cursor is on. The mouse drives the same cursor, per
    the shell's `CursorSurface` contract, so there is one highlight rather than two.
+8. **Summonable from a key** *(added 2026-09-02, Phase 4d)* — `omarchy-shell shell toggle
+   io.hubdev.buddy`, bound like any first-party panel, opens Buddy on the focused output
+   without going to the bar. The panel takes the keyboard as it maps, so the key lands
+   straight in the search box and items 6 and 7 are what happens next.
 
 ### 5.3 Actions
 
@@ -922,6 +926,70 @@ having the cursor, and the domain is correctly *not* underlined because Enter wo
 it from there. Keystroke delivery itself was left for the user to exercise: opening the panel
 over IPC takes the keyboard from whatever they are doing, which is how a previous verification
 pass ate a sentence of their typing.
+
+
+#### Phase 4d — summon it from a key ✅ 2026-09-02
+
+```lua
+o.bind("SUPER + CTRL + J", "HubDev Buddy", "omarchy-shell shell toggle io.hubdev.buddy")
+```
+
+**The route already existed; this plugin was not eligible for it.** Omarchy binds its own
+panels with `omarchy-shell shell toggle <id>`, which goes through `shell.summon` →
+`Bar.summonBarWidget` → `Bar.findPanelWidget` → `BarModel.pickPanelSlot`, and that last step is
+what picks the widget on the output Hyprland has focused. Nothing needed writing. What needed
+fixing was one property name.
+
+**`opened`, not `panelOpen`.** `findPanelWidget` and `panelNavigationSlots` both skip any slot
+whose item lacks `open()`, `close()` **or `opened`**, and they inspect the *widget root*, not
+the panel. Calling it `panelOpen` was not a bug in any file — it was a contract expressed as a
+name, so nothing could report it. It cost four things at once:
+
+- `omarchy-shell shell toggle io.hubdev.buddy` answered `unknown`, so there was no keybind;
+- Buddy was left out of the `SUPER+CTRL+<n>` panel numbering — which does not leave a gap, it
+  renumbers every panel to its right, so `right 1` resolved to `omarchy.agents` while Buddy
+  sat second in the layout;
+- `Tab`, wired to `bar.switchPanelFrom` back in Phase 3, could never find its own slot and so
+  had never once worked;
+- `KeyboardPanel` reads `popoutSwitchClosing` off its *owner*, which `Panel.qml` sets to the
+  widget (`owner: root.hostWidget`) — so the popout hand-off had nothing to read either.
+
+Renaming it fixed all four, and `popoutSwitchClosing` is now forwarded beside it. The lesson is
+about the shape of the failure, not the fix: **a contract carried by a property name fails
+silently and completely**, and the only thing that would have caught it is asking the shell to
+route to us and reading the log line that came back.
+
+**Summoning stopped being a broadcast.** The plugin's own `open`/`close`/`toggle` IPC routes
+relayed to every monitor's instance, which on two heads opened the panel on both — not an
+answer to "show me this", since only one of them can be looked at. Those three now go through
+`runOnFocused()`, the same bar routing `shell toggle` uses, so the two entry points cannot
+disagree about which screen the panel belongs on. `refresh` stays a broadcast for the opposite
+reason: every head draws the mark, and leaving one on older numbers than it has is a real
+difference the user can see.
+
+**`refresh("full")` moved into `open()`.** It used to live in the bar button's press handler,
+which was fine while clicking was the only way in. A keyboard summon is the entry point that
+most wants current numbers — going to look at something is the reason to press the key — so it
+belongs on the path all three routes share. Still coalesced, so a summon during an in-flight
+poll is a no-op rather than a second spawn.
+
+**Note the renumbering.** Buddy is second in the right section behind the tray, which has no
+panel and is not counted, so it now *is* `SUPER+CTRL+1` and every stock panel number shifted by
+one. That is the numbering doing what it documents — "the Nth panel icon the user can see" —
+rather than a regression, but it is muscle memory either way.
+
+- [x] `opened` + `popoutSwitchClosing` on the widget root, with the contract written down.
+- [x] `runOnFocused(verb)`; the three IPC routes stop broadcasting.
+- [x] `refresh("full")` moves from the press handler into `open()`.
+- [x] `o.bind` in `~/.config/hypr/bindings.lua` (outside this repo).
+
+**Verified live (2026-09-02).** `shell togglePanelAt right 1` → `io.hubdev.buddy` where it
+previously answered `omarchy.agents`. `omarchy-shell shell toggle io.hubdev.buddy` — the exact
+string the keybind runs — opens and closes cleanly, and `summon: no live bar widget` is gone
+from the shell log. With HDMI-A-1 focused the `omarchy-keyboard-panel` layer maps at `0 0` and
+the dismiss catcher at `1920 0`; with focus moved to DVI-D-1 the two swap, which is the
+focused-output claim proven rather than assumed. The plugin's own `io.hubdev.buddy toggle`
+route now maps one panel, not two.
 
 
 ### Phase 5 — Publish `v1.0`
