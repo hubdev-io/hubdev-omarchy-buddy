@@ -17,8 +17,13 @@ const NO_SEARCH = { active: false, sites: [], services: [] };
 
 const listOf = (summary, expanded = false, search = NO_SEARCH) =>
   Model.visibleSites(summary, search, expanded);
+const svcOf = (summary, expanded = false, search = NO_SEARCH) =>
+  Model.visibleServices(summary, search, expanded);
+// The whole map: sites, then services. The sweep at the foot of this file walks
+// it end to end, so every service row is covered by the same "no dead ends"
+// assertion the site rows have had since Phase 4c.
 const navOf = (summary, expanded = false, search = NO_SEARCH) =>
-  Actions.navRows(summary, listOf(summary, expanded, search));
+  Actions.navRows(summary, listOf(summary, expanded, search), svcOf(summary, expanded, search));
 
 // ------------------------------------------------------------ draw order --
 
@@ -100,14 +105,19 @@ test("a row with no URL and no runnable action is left out of the map", () => {
 
 test("the collapsed count sits between the two groups, and only when drawn", () => {
   const collapsed = navOf(healthy, false);
-  const last = collapsed[collapsed.length - 1];
-  assert.equal(last.key, "sites:collapse");
-  assert.deepEqual(last.cols, ["toggle"]);
+  const at = collapsed.findIndex((r) => r.key === "sites:collapse");
+  assert.ok(at > 0, "after the serving rows");
+  assert.deepEqual(collapsed[at].cols, ["toggle"]);
+  // Everything above it is a serving site; the parked ones are not drawn, so
+  // whatever follows belongs to the next section rather than to Sites.
+  assert.ok(collapsed.slice(0, at).every((r) => r.kind === "site"));
+  assert.equal(collapsed.slice(at + 1).some((r) => r.kind === "site"), false);
 
   const open = navOf(healthy, true);
-  const at = open.findIndex((r) => r.key === "sites:collapse");
-  assert.equal(at, collapsed.length - 1, "still after the serving rows");
-  assert.ok(at < open.length - 1, "and now with parked rows below it");
+  const openAt = open.findIndex((r) => r.key === "sites:collapse");
+  assert.equal(openAt, at, "still in the same place, after the serving rows");
+  assert.ok(open.slice(openAt + 1).some((r) => r.kind === "site"),
+            "and now with parked rows below it");
 
   const searching = navOf(healthy, false, Model.searchResults(healthy, "app"));
   assert.equal(searching.some((r) => r.kind === "collapse"), false);
@@ -271,4 +281,154 @@ test("every fixture produces a map the cursor can walk end to end", () => {
       if (rows.length) assert.equal(at.key, rows[rows.length - 1].key, name);
     }
   }
+});
+
+// --------------------------------------------------------------- services --
+//
+// Phase 4e put buttons on the Services rows, which is what brought them into
+// the map at all. The rules are the same ones the site rows follow; what is
+// different is worth its own tests, because each difference was a decision.
+
+test("services follow the sites, in the order the dense view stacks them", () => {
+  const rows = navOf(healthy, true);
+  const lastSite = rows.map((r) => r.kind).lastIndexOf("site");
+  const firstService = rows.findIndex((r) => r.kind === "service");
+  assert.ok(firstService > lastSite, "a service never comes before a site");
+  assert.ok(rows.slice(firstService).every((r) => r.kind === "service"));
+});
+
+test("a service row has no open column — only the verbs that would run", () => {
+  // The difference from a site row, and the reason for it: a domain is
+  // somewhere to go, a service is not, and Enter on the row would have to
+  // silently pick one of start/stop/restart.
+  const running = navOf(healthy).find((r) => r.key === "svc:mysql");
+  assert.deepEqual(running.cols, ["restart", "stop"]);
+  assert.equal(running.cols.includes("open"), false);
+
+  const down = navOf(Model.summarize(fixture("all-stopped"))).find((r) => r.key === "svc:mysql");
+  assert.deepEqual(down.cols, ["start"]);
+});
+
+test("the cursor cannot stop on a service that was never set up", () => {
+  // Not even with the group expanded: there is no verb `serviceArgv` will
+  // build for one, so the row is not a place the cursor can reach.
+  for (const expanded of [false, true]) {
+    const rows = navOf(healthy, expanded);
+    for (const name of ["meilisearch", "minio", "reverb"])
+      assert.equal(rows.some((r) => r.key === `svc:${name}`), false, name);
+  }
+});
+
+test("the not-set-up count is not a cursor stop, unlike the parked-sites one", () => {
+  // Deliberate asymmetry: parked sites can be acted on once revealed, and
+  // these cannot, so a cursor that could open the group would walk into a
+  // group with nothing in it to press.
+  const rows = navOf(healthy, true);
+  assert.equal(rows.some((r) => r.key === "services:collapse"), false);
+});
+
+test("navTarget names the service, and never confuses it with a site", () => {
+  const rows = navOf(healthy);
+  const target = Actions.navTarget(rows, "svc:mysql", 1);
+  assert.equal(target.kind, "service");
+  assert.equal(target.site, null, "a service row carries no site");
+  assert.equal(target.service.name, "mysql");
+  assert.equal(target.action, "stop");
+  // And the action it names is one the allowlist will really build an argv for.
+  assert.ok(Actions.serviceArgv(healthy, target.service, target.action).length > 0);
+
+  const site = Actions.navTarget(rows, rows[0].key, 0);
+  assert.equal(site.kind, "site");
+  assert.equal(site.service, null, "a site row carries no service");
+});
+
+test("arrows walk out of the site list and into the services", () => {
+  const rows = navOf(healthy, true);
+  const lastSite = rows[rows.map((r) => r.kind).lastIndexOf("site")];
+  const next = Actions.navMove(rows, lastSite.key, 0, 0, 1);
+  assert.equal(next.key.startsWith("svc:"), true);
+
+  // And back, which is the property that matters: a section boundary must not
+  // be a one-way door.
+  const back = Actions.navMove(rows, next.key, next.col, 0, -1);
+  assert.equal(back.key, lastSite.key);
+});
+
+test("the column is clamped when a two-button row follows a four-column one", () => {
+  // A site row offers up to four columns and a service row two. Carrying the
+  // column down would otherwise put the cursor off the end of the row it
+  // lands on — which is the same clamp the site rows already rely on, now
+  // across a section boundary where the widths genuinely differ.
+  const rows = navOf(healthy, true);
+  const lastSiteIndex = rows.map((r) => r.kind).lastIndexOf("site");
+  const lastSite = rows[lastSiteIndex];
+  assert.ok(lastSite.cols.length > 2);
+  const next = Actions.navMove(rows, lastSite.key, lastSite.cols.length - 1, 0, 1);
+  const landed = rows.find((r) => r.key === next.key);
+  assert.equal(next.col, landed.cols.length - 1);
+  assert.ok(Actions.navTarget(rows, next.key, next.col));
+});
+
+test("a machine with nothing running still offers every stopped service a start", () => {
+  const s = Model.summarize(fixture("all-stopped"));
+  const rows = navOf(s, true).filter((r) => r.kind === "service");
+  assert.ok(rows.length > 0);
+  for (const row of rows) {
+    assert.deepEqual(row.cols, ["start"]);
+    const target = Actions.navTarget(rows, row.key, 0);
+    assert.deepEqual(Actions.serviceArgv(s, target.service, target.action),
+                     ["hubdev", "service:start", target.service.name]);
+  }
+});
+
+test("a search puts service rows in the map alongside the sites it matched", () => {
+  // Finding a service by typing three letters and pressing Enter on its stop
+  // button is the flow this exists for.
+  const search = Model.searchResults(healthy, "redis");
+  const rows = navOf(healthy, false, search);
+  assert.ok(rows.some((r) => r.key === "svc:redis"));
+});
+
+// ------------------------------------------------------- visibleServices --
+
+test("the service draw order is set up, then the count, then the rest", () => {
+  const collapsed = Model.visibleServices(healthy, NO_SEARCH, false);
+  assert.ok(collapsed.rows.length > 0);
+  assert.equal(collapsed.others.length, 0, "hidden rows are not drawn");
+  // Two, not three: `reverb` is set to auto-start, so it belongs to this
+  // machine's setup and is listed — stopped, and with no buttons, because
+  // starting it would mean installing a package first.
+  assert.equal(collapsed.collapse.count, 2);
+  assert.equal(collapsed.collapse.expanded, false);
+  assert.match(collapsed.collapse.label, /^2 not set up$/);
+
+  const open = Model.visibleServices(healthy, NO_SEARCH, true);
+  assert.equal(open.rows.length, collapsed.rows.length);
+  assert.equal(open.others.length, 2);
+  assert.equal(open.total, open.rows.length + open.others.length);
+});
+
+test("no collapsed row when every service is set up", () => {
+  const s = Model.summarize(fixture("minimal"));
+  const list = Model.visibleServices(s, NO_SEARCH, false);
+  assert.equal(list.collapse, null);
+  assert.equal(list.total, 0);
+});
+
+test("a search flattens the services the same way it flattens the sites", () => {
+  const search = Model.searchResults(healthy, "mini");
+  const list = Model.visibleServices(healthy, search, false);
+  assert.equal(list.searching, true);
+  assert.equal(list.collapse, null, "the collapsed group is what was hiding it");
+  // minio was never set up, and is found anyway — its row simply draws no
+  // buttons.
+  assert.ok(list.rows.some((r) => r.service.name === "minio"));
+});
+
+test("every row carries its own spans, so a view never has to look them up", () => {
+  const search = Model.searchResults(healthy, "sql");
+  const list = Model.visibleServices(healthy, search, false);
+  for (const row of list.rows) assert.ok(Array.isArray(row.spans));
+  for (const row of Model.visibleServices(healthy, NO_SEARCH, true).rows)
+    assert.deepEqual(row.spans, []);
 });

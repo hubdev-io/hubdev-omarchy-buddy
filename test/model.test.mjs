@@ -73,16 +73,48 @@ test("an installed auto-start service that is stopped is yellow", () => {
   assert.ok(s.issues.some((i) => /Redis is set to start automatically but is stopped/.test(i)));
 });
 
-test("an UNINSTALLED auto-start service never warns", () => {
-  // reverb ships auto_start:true, installed:false on the dev machine. Warning
-  // about it would be a permanent false positive the user cannot clear.
+test("an auto-start service that cannot be started without an install never warns", () => {
+  // reverb ships auto_start:true and native mode with no binary. Warning about
+  // it would be a permanent false positive the user cannot clear. Note this is
+  // now `startable`, not `installed` — see the next test for why that matters.
   const s = Model.summarize(fixture("healthy"));
   const reverb = s.services.rows.find((r) => r.name === "reverb");
   assert.equal(reverb.autoStart, true);
-  assert.equal(reverb.installed, false);
+  assert.equal(reverb.startable, false, "native, and its package is not there");
   assert.equal(reverb.up, false);
   assert.equal(reverb.broken, false);
   assert.equal(s.level, "ok");
+});
+
+test("stopping a service does not silence its auto-start warning", () => {
+  // THE REGRESSION THIS FIXTURE EXISTS FOR. HubDev's `service:stop` removes the
+  // container, so `installed` goes false — and while `broken` was defined as
+  // `autoStart && installed && !up`, stopping Redis from the panel made the bar
+  // go quiet about it. Two services down and a green mark. Verified live before
+  // it was fixed.
+  const s = Model.summarize(fixture("stopped-by-hubdev"));
+  for (const name of ["redis", "mailpit"]) {
+    const row = s.services.rows.find((r) => r.name === name);
+    assert.equal(row.up, false);
+    assert.equal(row.immediate, false, "the container is gone; the image is not");
+    assert.equal(row.startable, true, "a docker service can always be brought up");
+    assert.equal(row.broken, true, `${name} is set to auto-start and is stopped`);
+  }
+  assert.equal(s.level, "warn");
+  assert.ok(s.issues.some((i) => /are set to start automatically but are stopped/.test(i)));
+});
+
+test("a service stopped from the panel stays in the list it was stopped in", () => {
+  // The other half of the same bug: splitting on `installed` moved the row into
+  // "not set up" the moment it was stopped, so the thing you had just acted on
+  // vanished — along with the button that would bring it back.
+  const s = Model.summarize(fixture("stopped-by-hubdev"));
+  const g = Model.serviceGroups(s);
+  const listed = g.configured.map((r) => r.name);
+  assert.ok(listed.includes("redis"), "redis is still one of this machine's services");
+  assert.ok(listed.includes("mailpit"));
+  // And what is left in the collapsed group is only what was never set up.
+  assert.deepEqual(g.others.map((r) => r.name).sort(), ["meilisearch", "minio"]);
 });
 
 test("docker down warns only because installed docker-mode services need it", () => {
@@ -338,19 +370,19 @@ test("services set up here are listed; ones never configured collapse", () => {
   const s = Model.summarize(fixture("healthy"));
   const g = Model.serviceGroups(s);
 
-  assert.ok(g.installed.every((r) => r.installed));
-  assert.ok(g.available.every((r) => !r.installed));
-  assert.equal(g.availableCount, g.available.length);
-  assert.equal(g.installed.length + g.available.length, s.services.rows.length);
+  assert.ok(g.configured.every((r) => r.configured));
+  assert.ok(g.others.every((r) => !r.configured));
+  assert.equal(g.otherCount, g.others.length);
+  assert.equal(g.configured.length + g.others.length, s.services.rows.length);
 });
 
 test("a broken service sorts first, then running, then the rest", () => {
   const s = Model.summarize(fixture("autostart-service-stopped"));
   const g = Model.serviceGroups(s);
-  const broken = g.installed.filter((r) => r.broken);
+  const broken = g.configured.filter((r) => r.broken);
 
   assert.ok(broken.length > 0, "fixture precondition");
-  assert.equal(g.installed[0].broken, true);
+  assert.equal(g.configured[0].broken, true);
 });
 
 test("envRows always leads with Caddy and carries one row per PHP version", () => {

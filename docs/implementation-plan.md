@@ -731,9 +731,12 @@ work from `~/.config/omarchy/plugins`.
 - [x] `Actions.js` allowlist, argv construction, snapshot validation. **The three detached
       site verbs ship (2026-09-01)** — see *Phase 4a* below. Confirm-gates are still to come,
       and are only needed by the verbs that are still to come.
-- [ ] `run(request)` + `actionState` + spinner + red-icon-with-refusal + 6s self-clear.
-- [ ] Refresh burst; per-action timeout (15s default, 120s for image pulls) with a message
-      that names what timed out.
+- [x] `run(request)` + `actionState` + spinner + red-icon-with-refusal + 6s self-clear.
+      **Shipped as Phase 4e (2026-09-02)** for the three service verbs. `actionState` gained a
+      fourth phase, `done`, which the plan did not have and use asked for.
+- [x] Refresh burst; per-action timeout (90s start/restart, 45s stop) with a message that names
+      what timed out. The plan's "15s default" was too tight for a container start on this
+      machine, and reporting a timeout for something merely slow is worse than waiting.
 - [x] `Actions.js` tests: every row shape → the exact argv, and the refusal cases.
 
 #### Phase 4a — the three detached site actions ✅ 2026-09-01
@@ -990,6 +993,99 @@ from the shell log. With HDMI-A-1 focused the `omarchy-keyboard-panel` layer map
 the dismiss catcher at `1920 0`; with focus moved to DVI-D-1 the two swap, which is the
 focused-output claim proven rather than assumed. The plugin's own `io.hubdev.buddy toggle`
 route now maps one panel, not two.
+
+
+#### Phase 4e — the service verbs ✅ 2026-09-02
+
+The first actions in this plugin that change the machine, and every difference from the
+detached three follows from that. They have an exit code worth reading, a failure worth
+showing and a duration long enough that the panel has to say something while it waits — so
+they get `BarWidget.runAction`: a `Process` of their own, a per-verb guard timer, an
+`actionState` the rows and the footer bind to, and a burst of refreshes afterwards.
+
+**`start` · `restart` · `stop`, and never all three on one row.** `Actions.serviceArgv` refuses
+the verbs the service's current state cannot use, so the row shows `start`, or `restart` and
+`stop`. The refusal is asked of the **snapshot**, not of the row the view is holding: a panel
+open for a minute must not be able to stop something that stopped on its own in the meantime.
+
+**Only `stop` arms.** Plan §5.4 gates "anything that stops something someone may be using", and
+its three examples share the property that matters — they leave the thing down until a person
+notices. A restart drops open connections too, but it puts the service back by itself. Arming
+both would make two of the three buttons on every running row take two presses, which is how a
+confirm gate stops being read at all. The gate is keyed on the **button**
+(`svc:<name>:<verb>`), held for 4s, and disarmed by Escape, by moving the cursor, by typing
+into the search, and by reopening the panel.
+
+**The status line is in the footer, and that is the decision.** A line above the list pushes
+every row down by its own height — so the button you are about to press a *second* time moves
+out from under the pointer. The body is anchored between the search box and the footer, so a
+line there grows the panel downwards instead and the rows do not move. One line carries all
+four states, which are mutually exclusive by construction.
+
+**`done` was not in the plan and should have been.** The first cut had no success phase, on the
+argument that the dot going green already says it. Use proved otherwise: the dot you are
+waiting on is one of eight in a list, and the thing you are looking at is the button you just
+pressed. It now says *"Redis restarted"* for three seconds, in the same line, with an emerald
+dot — a failure holds for six, because a refusal is read twice.
+
+**The cursor walks Services.** `Model.visibleServices()` returns the buckets in draw order and
+`Actions.navServices` walks it, exactly as Phase 4c did for Sites. A service row has **no
+`open` column**: Enter on the row itself would have to silently pick one of three verbs, which
+is precisely the guess a panel that runs things must not make.
+
+##### 7.7 `installed` does not mean "set up here" — and three rules read it that way
+
+Found by using it. Stopping Mailpit from the panel greyed the row out and left no way back.
+
+HubDev's `installed` is `isServiceInstalled()`, documented as *"starting this service would be
+immediate"* — for a docker service, that the container object exists. Its own `service:stop`
+**removes** the container. So the flag flips false on every stop, while the image stays local.
+
+`Model.js` had been reading it as *"is this one of my services"* in three places, and all three
+broke the moment the panel had a stop button:
+
+- `serviceGroups` split on it → a stopped service moved into the collapsed *"not set up"*
+  group, so the row you had just acted on vanished from the list;
+- the action gate required it → the start button went with the row;
+- `broken = autoStart && installed && !up` → the *"set to start automatically but is stopped"*
+  warning fell silent, so **the bar mark stayed green with two services down**. That is the
+  widget's entire job failing, silently, as a side effect of adding a stop button.
+
+The question is now split in two, computed once in `summarize()`:
+
+| | rule | used by |
+|---|---|---|
+| `immediate` | `installed` verbatim | nothing yet — kept because it is the only honest name for it |
+| `configured` | `up \|\| autoStart \|\| immediate` | the Services split, and the action gate |
+| `startable` | `immediate \|\| mode === "docker"` | the attention warning, and `start` |
+
+`startable` is what keeps `reverb` — auto-start, native, no binary — from warning forever about
+something that was never set up, which is the job `installed` was doing before it turned out to
+mean something else.
+
+**The fixtures could not have caught it.** `all-stopped.json` has stopped docker services with
+`installed: true`, which *is* a real state — containers stopped by Docker, or left by a reboot
+— but not the one HubDev's own stop produces. `stopped-by-hubdev.json` pins that state, and is
+derived from the redacted `healthy.json` rather than captured live so that it inherits its
+redaction (R6).
+
+**This is a HubDev bug as well as ours**, raised upstream: the same field drives its own
+Services page, which will show an "install" icon instead of "play" for a service the user just
+stopped. The clean fix there is a separate `configured` field in the snapshot, because
+`installed` cannot answer both questions.
+
+- [x] `Actions.js`: `serviceActions` / `serviceArgv` / `needsConfirm` / `timeoutMs` /
+      `confirmToken` / `serviceActionLabel` / `serviceDoneLabel` / `parseResult`, 27 tests.
+- [x] `BarWidget.runAction` + `finishAction` + `burstRefresh`, its own `Process` and guard.
+- [x] `Model.visibleServices`, `configured` / `startable`, `serviceGroups` on `configured`.
+- [x] `ServiceRow` rewritten to the SiteRow shape; the footer status line; the confirm gate.
+
+**Verified (2026-09-02).** 191 tests over 11 fixtures; `omarchy plugin validate` exit 0;
+`qmllint` clean; privacy scan clean. Against the live machine with Redis and Mailpit stopped by
+the panel: both stay listed, both offer `start`, `reverb` is listed with no buttons,
+`meilisearch`/`minio` stay collapsed, and the issues read *"Redis, Mailpit are set to start
+automatically but are stopped"*. **Exercised by the user** — stop and restart driven from the
+panel on Mailpit and Redis.
 
 
 ### Phase 5 — Publish `v1.0`

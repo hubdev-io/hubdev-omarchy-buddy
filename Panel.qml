@@ -91,6 +91,120 @@ Panel {
     root.close();
   }
 
+  // --------------------------------------------------------------- services --
+  //
+  // Start, stop and restart, and the two things that make them different from
+  // every action before them: they can fail, and one of them arms first.
+  //
+  // The panel still decides nothing about what may run — `Actions.serviceArgv`
+  // turns (summary, service, key) into an argv or into [], and [] drops the
+  // press. What is decided here is only the gesture: whether this press arms a
+  // button or sends it.
+  //
+  // **The panel does not close.** Every action before this one handed the
+  // screen to something else — a browser, a terminal, an editor — so leaving a
+  // popout behind it read as a click that had not landed. This one has its
+  // answer *in the panel*: the spinner, then the dot going green. Closing would
+  // throw away the only feedback there is.
+  //
+  // The armed button is held for four seconds. That is long enough to read the
+  // question at the foot of the panel and short enough that a gate left armed
+  // by a misclick is gone before it can be pressed by accident later.
+  property string confirmKey: ""
+
+  readonly property var actionState: root.hostWidget && root.hostWidget.actionState
+    ? root.hostWidget.actionState
+    : ({ key: "", subject: "", label: "", done: "", phase: "idle", message: "" })
+
+  Timer {
+    id: confirmTimer
+    interval: 4000
+    repeat: false
+    onTriggered: root.confirmKey = ""
+  }
+
+  function disarm() {
+    root.confirmKey = "";
+    confirmTimer.stop();
+  }
+
+  function runServiceAction(service, key) {
+    var argv = Actions.serviceArgv(root.summary, service, key);
+    if (!argv.length)
+      return;
+
+    var ref = Actions.serviceRef(service);
+    var token = Actions.confirmToken(ref, key);
+
+    // Arm on the first press of a gated verb; send on the second. Pressing a
+    // *different* button re-arms rather than firing, which is the whole point
+    // of keying the gate on the button and not on the row.
+    if (Actions.needsConfirm(key) && root.confirmKey !== token) {
+      root.confirmKey = token;
+      confirmTimer.restart();
+      return;
+    }
+
+    root.disarm();
+    if (root.hostWidget && typeof root.hostWidget.runAction === "function") {
+      root.hostWidget.runAction({
+        argv: argv,
+        key: key,
+        subject: ref,
+        label: Actions.serviceActionLabel(key, service.display || ref),
+        doneLabel: Actions.serviceDoneLabel(key, service.display || ref),
+        timeoutMs: Actions.timeoutMs(key)
+      });
+    }
+  }
+
+  // What the foot of the panel is saying, if anything. One line, four states,
+  // in the order they matter: what went wrong, what is being asked, what is
+  // happening, what just happened. Empty means the row is not drawn at all.
+  //
+  // One line rather than four pieces of chrome, because these are mutually
+  // exclusive by construction — one action at a time, and a gate is armed only
+  // before one starts.
+  readonly property string statusText: {
+    if (root.actionState.phase === "failed")
+      return (root.actionState.label || "That") + " — " + root.actionState.message;
+    if (root.confirmKey !== "")
+      return root.confirmLabel + "? Press again to confirm.";
+    if (root.actionState.phase === "running")
+      return (root.actionState.label || "Working") + "\u2026";
+    if (root.actionState.phase === "done")
+      return root.actionState.done || "";
+    return "";
+  }
+
+  readonly property string statusLevel: {
+    if (root.actionState.phase === "failed")
+      return "down";
+    if (root.confirmKey !== "")
+      return "warn";
+    // Emerald, the same dot a running service draws — a confirmation that
+    // matched the failure's red would read as another problem.
+    return root.actionState.phase === "done" ? "ok" : "info";
+  }
+
+  // The armed gate in words. Rebuilt from the snapshot rather than remembered,
+  // so a service that disappeared under an armed button leaves nothing behind
+  // to confirm.
+  readonly property string confirmLabel: {
+    if (root.confirmKey === "")
+      return "";
+    var rows = root.summary.services ? root.summary.services.rows : [];
+    for (var i = 0; i < rows.length; i++) {
+      var ref = Actions.serviceRef(rows[i]);
+      var actions = Actions.serviceActions();
+      for (var j = 0; j < actions.length; j++) {
+        if (Actions.confirmToken(ref, actions[j].key) === root.confirmKey)
+          return Actions.serviceActionLabel(actions[j].key, rows[i].display || ref);
+      }
+    }
+    return "";
+  }
+
   // ---------------------------------------------------------------- search --
   //
   // Exactly what the user typed, and nothing else: no field, no focus, no mode
@@ -112,12 +226,19 @@ Panel {
   onOpenedChanged: {
     root.query = "";
     root.clearCursor();
+    root.disarm();
   }
 
   // Every keystroke re-ranks the list, so the row the cursor was on is not the
   // row it would be on now. Dropping it is the honest answer, and it puts
   // Enter back on the top match — which is what someone still typing means.
-  onQueryChanged: root.clearCursor()
+  onQueryChanged: {
+    root.clearCursor();
+    // A query that re-ranks the list has moved the button the gate was armed
+    // on. Holding the arm across that would be holding it over whatever row
+    // has since taken that place.
+    root.disarm();
+  }
 
   function typeQuery(text) {
     // A cap, not a limit anyone will reach: this is a filter over fifteen rows,
@@ -133,7 +254,11 @@ Panel {
   // Escape means "undo the narrowing", and only then "close". Anything else
   // makes the key that clears a filter also throw the panel away.
   function dismiss() {
-    if (root.cursorKey !== "" || root.query !== "") {
+    // Escape undoes the smallest thing first, and an armed gate is the
+    // smallest: it is the one state on screen that is *asking* a question.
+    if (root.confirmKey !== "") {
+      root.disarm();
+    } else if (root.cursorKey !== "" || root.query !== "") {
       root.clearCursor();
       root.query = "";
     } else {
@@ -165,12 +290,20 @@ Panel {
   // cursor has to know whether those rows are drawn before it can walk them,
   // and because Enter on the collapsed count is what expands it.
   property bool sitesExpanded: false
+  // The same for the services that were never set up. Not a cursor stop —
+  // there is nothing runnable behind it — so this one is only ever toggled by
+  // a click. See ServicesSection.
+  property bool servicesExpanded: false
 
-  // The panel's draw order and the cursor's map, from the same two calls.
+  // The panel's draw order and the cursor's map, from the same three calls.
   readonly property var siteList: Model.visibleSites(root.summary, root.search, root.sitesExpanded)
-  readonly property var nav: Actions.navRows(root.summary, root.siteList)
+  readonly property var serviceList: Model.visibleServices(root.summary, root.search, root.servicesExpanded)
+  readonly property var nav: Actions.navRows(root.summary, root.siteList, root.serviceList)
 
   function moveCursor(dx, dy) {
+    // Moving off an armed button cancels it. A gate is a question about the
+    // thing under the cursor, and the cursor has just stopped being there.
+    root.disarm();
     var next = Actions.navMove(root.nav, root.cursorKey, root.cursorCol, dx, dy);
     root.cursorKey = next.key;
     root.cursorCol = next.col;
@@ -194,6 +327,8 @@ Panel {
       return;
     if (target.kind === "collapse")
       root.sitesExpanded = !root.sitesExpanded;
+    else if (target.kind === "service")
+      root.runServiceAction(target.service, target.action);
     else if (target.action === "open")
       root.openSite(target.site);
     else
@@ -447,6 +582,9 @@ Panel {
               item.summary = Qt.binding(function () { return root.summary; });
               item.search = Qt.binding(function () { return root.search; });
               item.list = Qt.binding(function () { return root.siteList; });
+              item.services = Qt.binding(function () { return root.serviceList; });
+              item.actionState = Qt.binding(function () { return root.actionState; });
+              item.confirmKey = Qt.binding(function () { return root.confirmKey; });
               item.cursorKey = Qt.binding(function () { return root.cursorKey; });
               item.cursorCol = Qt.binding(function () { return root.cursorCol; });
               item.foreground = Qt.binding(function () { return root.barForeground; });
@@ -465,6 +603,41 @@ Panel {
         anchors.left: parent.left
         anchors.right: parent.right
         spacing: Style.space(10)
+
+        // What an action is doing, asking or refusing — in the FOOTER, and the
+        // placement is the decision, not the wording.
+        //
+        // A line that appears above the list pushes every row down by its own
+        // height, which for a confirm gate means the button you are about to
+        // press for the second time moves out from under the pointer. The body
+        // is anchored between the search box and this column, so a line here
+        // grows the panel downwards (or shrinks the scroll area, when the panel
+        // is already at its cap) and the rows do not move at all.
+        Row {
+          width: parent.width
+          visible: root.statusText !== ""
+          spacing: Style.space(6)
+
+          StatusDot {
+            anchors.verticalCenter: parent.verticalCenter
+            level: root.statusLevel
+            size: Style.space(6)
+          }
+
+          Text {
+            width: parent.width - Style.space(6) * 2
+            anchors.verticalCenter: parent.verticalCenter
+            text: root.statusText
+            textFormat: Text.PlainText
+            wrapMode: Text.WordWrap
+            maximumLineCount: 2
+            elide: Text.ElideRight
+            color: root.barForeground
+            opacity: 0.85
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+        }
 
         PanelSeparator {
           width: parent.width

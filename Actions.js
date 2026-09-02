@@ -144,6 +144,285 @@ function knownSite(summary, ref) {
   return false;
 }
 
+// --------------------------------------------------------------- services --
+//
+// The first actions here that are NOT detached, and every difference follows
+// from that one fact.
+//
+// `hubdev site:terminal` opens a window and we never hear from it again. These
+// three change the machine and then report whether they managed to: they have
+// an exit code worth reading, a failure worth showing, and a duration long
+// enough that the panel has to say something while it waits. So they go
+// through `BarWidget.runAction` — a `Process` with a guard timer — rather than
+// `Util.execArgv`, and the panel gains a spinner, a refusal line and a confirm
+// gate to match. That machinery is the rest of Phase 4; this table is what it
+// is allowed to point at.
+//
+// **Escalation was checked before this shipped, not assumed** (plan §7.1). The
+// native provider reaches root through `platform.RunPrivileged`, which is
+// `sudo -n` (never prompts) and then `pkexec` (prompts, but visibly). The two
+// things it runs are `bash -c <script>` and `systemctl stop <unit>` — both
+// covered NOPASSWD by the sudoers rule HubDev installs, so rung 1 answers and
+// rung 2 is never reached. The docker provider does not escalate at all. The
+// guard timer is still mandatory: on a machine where that rule is absent, a
+// polkit dialog would block the child until somebody answers it, and a bar
+// widget must not be able to wait forever on one.
+//
+// key     — what the UI sends back, and the test's handle on the row.
+// icon    — a name in Theme.ICONS. Theme owns glyphs.
+// label   — the verb alone. The subject is added where it is shown.
+// args    — everything between the binary and the service name.
+// needs   — the state the service must ALREADY be in. This is what makes the
+//           row show either `start` or `restart`+`stop` and never all three:
+//           the pair that cannot apply is not offered, rather than offered and
+//           refused.
+// confirm — whether a first press only arms the button. See `needsConfirm`.
+// timeout — the hard ceiling on the Process, in ms. See the note below it.
+var SERVICE_ACTIONS = [
+  {
+    key: "start",
+    icon: "play",
+    label: "Start",
+    args: ["service:start"],
+    needs: "down",
+    confirm: false,
+    timeout: 90000
+  },
+  {
+    key: "restart",
+    icon: "restart",
+    label: "Restart",
+    args: ["service:restart"],
+    needs: "up",
+    confirm: false,
+    timeout: 90000
+  },
+  {
+    key: "stop",
+    icon: "stop",
+    label: "Stop",
+    args: ["service:stop"],
+    needs: "up",
+    confirm: true,
+    // A stop is a docker graceful shutdown or a `systemctl stop`, and neither
+    // pulls anything. It gets half the ceiling because a stop that has not
+    // returned in 45s is stuck, not slow.
+    timeout: 45000
+  }
+];
+
+function serviceActionByKey(key) {
+  for (var i = 0; i < SERVICE_ACTIONS.length; i++) {
+    if (SERVICE_ACTIONS[i].key === key)
+      return SERVICE_ACTIONS[i];
+  }
+  return null;
+}
+
+// Only `stop` arms, and the line between the three is worth stating because it
+// is not "destructive vs not".
+//
+// Plan §5.4 gates "anything that stops something someone may be using", and its
+// three examples — `caddy:stop`, `php:stop`, `site:stop` — share the property
+// that matters: they leave the thing down until a person notices. A restart
+// drops open connections too, which is real, but it puts the service back by
+// itself; the failure mode is a few seconds of downtime, not an afternoon of
+// wondering why the app cannot reach MySQL. Arming both would make two of the
+// three buttons on every running row take two presses, which is how a confirm
+// gate stops being read at all.
+function needsConfirm(key) {
+  var action = serviceActionByKey(key);
+  return action ? action.confirm === true : false;
+}
+
+// The Process ceiling for one verb. Deliberately generous next to the 15s
+// snapshot timeout: this machine's SQL Server container takes a while to come
+// up, and reporting "did not answer in time" for something that was merely slow
+// is worse than waiting, because the panel would then be telling the user a lie
+// about their own machine.
+//
+// A ceiling is not a claim the verb finished — a killed `service:start` can
+// leave Docker still starting. That is exactly why the burst refresh runs on
+// timeout as well as on success: the snapshot, not the exit code, is what the
+// panel finally believes.
+function timeoutMs(key) {
+  var action = serviceActionByKey(key);
+  return action && action.timeout > 0 ? action.timeout : 60000;
+}
+
+// The rows the UI draws — a copy, without `args`, for the same reason
+// `siteActions` withholds them. `confirm` is exposed because the button has to
+// know it will arm before it is pressed, and that is a fact about the verb
+// rather than a command line.
+function serviceActions() {
+  return SERVICE_ACTIONS.map(function (a) {
+    return { key: a.key, icon: a.icon, label: a.label, confirm: a.confirm === true };
+  });
+}
+
+// The service's own name, or "" when it cannot go on a command line. Same rule
+// and the same reason as `siteRef`: `hubdev` parses its own flags out of the
+// argv it is handed, so a leading `-` would be read as one. Services have no
+// second identity to fall back to — `display` is a human label ("SQL Server"),
+// never an argument.
+function serviceRef(service) {
+  var v = service && typeof service === "object" ? service : {};
+  var name = typeof v.name === "string" ? v.name : "";
+  return REF_RE.test(name) ? name : "";
+}
+
+// The row for `ref` in the CURRENT snapshot, or null. The row a view holds is a
+// copy from an earlier poll, and every gate below asks its questions of this one
+// instead — a panel that has been open for a minute must not be able to stop a
+// service that is already stopped, or start one that came up on its own in the
+// meantime.
+function liveService(summary, ref) {
+  var rows = summary && summary.services ? summary.services.rows : null;
+  if (!rows || !rows.length)
+    return null;
+  for (var i = 0; i < rows.length; i++) {
+    if (serviceRef(rows[i]) === ref)
+      return rows[i];
+  }
+  return null;
+}
+
+// The whole gate, in one function, exactly as `siteArgv` is for sites: [] means
+// nothing is spawned, and nothing downstream re-checks.
+//
+// Four refusals, and the last two are the ones worth naming:
+//
+//  - **Not set up here.** HubDev lists its whole catalogue, including services
+//    this machine never configured. `service:start` on one of those is not a
+//    start — it is a setup, and the plan puts installs out of scope for v1
+//    (§5.3). `Model.summarize` answers this with `configured`, and the first
+//    version of this gate got it wrong by asking `installed` instead: HubDev's
+//    stop removes the container, so a service you had just stopped became
+//    "not set up" and lost the very button that would bring it back. That was
+//    the bug this gate exists to not have.
+//  - **Not startable without an install.** `startable` is the other half: a
+//    docker service can always be brought up, a native one needs its package
+//    present. Without this, the start button on a configured-but-never-built
+//    native service would kick off a package install from a bar panel.
+//  - **Wrong state.** Start is offered only to a stopped service and
+//    stop/restart only to a running one, so the two presses that could not
+//    possibly do anything are never on the row to be pressed.
+function serviceArgv(summary, service, key) {
+  var action = serviceActionByKey(key);
+  if (!action)
+    return [];
+
+  var ref = serviceRef(service);
+  if (!ref)
+    return [];
+
+  var live = liveService(summary, ref);
+  if (!live || live.configured !== true)
+    return [];
+
+  if (action.needs === "up" && live.up !== true)
+    return [];
+  if (action.needs === "down" && (live.up === true || live.startable !== true))
+    return [];
+
+  return [BIN].concat(action.args, [ref]);
+}
+
+// The handle for an armed confirm gate: subject and verb together, because
+// arming is per BUTTON and not per row. Built here so the panel that sets it
+// and the button that reads it cannot disagree about the format — the kind of
+// contract that, expressed as string concatenation in two files, fails by
+// simply never matching and never saying so.
+function confirmToken(ref, key) {
+  var r = typeof ref === "string" ? ref : "";
+  var k = typeof key === "string" ? key : "";
+  return r === "" || k === "" ? "" : "svc:" + r + ":" + k;
+}
+
+// What to call this action while it runs and after it fails: "Stop Redis",
+// "Restart SQL Server". Built here rather than in the panel so the wording of a
+// failure line is under test along with everything else.
+function serviceActionLabel(key, display) {
+  var action = serviceActionByKey(key);
+  var name = typeof display === "string" ? display : "";
+  if (!action)
+    return name;
+  return name ? action.label + " " + name : action.label;
+}
+
+// What to say once it worked: "Redis restarted", "Mailpit stopped". Past
+// tense, one clause, no exclamation — the panel is confirming, not celebrating.
+//
+// This exists because a start or a stop is otherwise reported only by a dot
+// changing colour somewhere in a list of eight, which is easy to miss when you
+// were looking at the button you just pressed. It shares the one status line at
+// the foot of the panel with the confirm question and the failure, so it costs
+// no new chrome, and it clears itself after a few seconds.
+var DONE = {
+  start: "started",
+  stop: "stopped",
+  restart: "restarted"
+};
+
+function serviceDoneLabel(key, display) {
+  var past = DONE[key];
+  var name = typeof display === "string" ? display : "";
+  if (!past)
+    return "";
+  return name ? name + " " + past : "Service " + past;
+}
+
+// ---------------------------------------------------------------- result --
+//
+// What came back from running one. This is the counterpart to
+// `SourceJson.parse`, and it lives here for the same reason that one lives in
+// the transport: the file that decides what may be run is the file that has to
+// know what "it worked" looks like.
+//
+// `service:start` prints `Starting redis... OK` and exits 0, or `FAIL` on the
+// same line followed by an indented reason, and exits 1. Both halves go to
+// **stdout** — the reason is not on stderr — and both are wrapped in ANSI
+// colour unconditionally, with no isatty check anywhere in the CLI. Stripping
+// those escapes is therefore not defensive tidying: without it the panel would
+// render `ESC[31mFAILESC[0m` at the user.
+var ANSI_RE = /\u001b\[[0-9;]*m/g;
+
+// A refusal is going on screen in a panel sized for a domain name. HubDev's own
+// errors are short; a Docker daemon's are not, and one of those unwrapped would
+// push the sections off the bottom.
+var MESSAGE_MAX = 160;
+
+function cleanMessage(text) {
+  var t = (typeof text === "string" ? text : "").replace(ANSI_RE, "");
+  var lines = t.split("\n");
+  var best = "";
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i].replace(/^\s+/, "").replace(/\s+$/, "");
+    // Skip the "Starting redis... FAIL" banner: the panel already knows which
+    // verb it ran and what it ran it on, and the reason is the line under it.
+    if (!line || /^(Starting|Stopping|Restarting)\b.*\b(OK|FAIL)$/.test(line))
+      continue;
+    best = line;
+  }
+  if (best.length > MESSAGE_MAX)
+    best = best.slice(0, MESSAGE_MAX - 1) + "…";
+  return best;
+}
+
+function parseResult(stdout, exitCode) {
+  if (exitCode === 0)
+    return { ok: true, message: "" };
+
+  // 127 is the shell's "not found"; Qt reports a failed spawn as -1 or -2. Same
+  // wording as the read path, because it is the same fact about the machine and
+  // the user should not have to notice which half of the plugin reported it.
+  if (exitCode === 127 || exitCode < 0)
+    return { ok: false, message: "HubDev is not installed" };
+
+  var message = cleanMessage(stdout);
+  return { ok: false, message: message || "HubDev exited with code " + exitCode };
+}
+
 // ------------------------------------------------------------------- keys --
 //
 // Where the keyboard cursor is allowed to be, and how it moves.
@@ -225,15 +504,65 @@ function navSites(out, summary, rows) {
   }
 }
 
-// `visible` is Model.visibleSites(...) — the panel's own draw order, so the
-// cursor cannot drift out of step with what is on screen.
-function navRows(summary, visible) {
+// The cursor columns for one service row: each verb that would actually run,
+// and nothing else.
+//
+// There is no `"open"` column here and that is the whole difference from a site
+// row. A domain is a thing you go to; a service is not — pressing Enter on the
+// row itself would have to mean one of start/stop/restart, and guessing which
+// is exactly the guess a panel that runs things must never make. So the row is
+// only ever a place the cursor passes through on its way to a button, and a
+// service with no runnable verb (one that is not set up) has no columns and is
+// therefore not in the map at all.
+function navServiceCols(summary, service) {
+  var cols = [];
+  var actions = serviceActions();
+  for (var i = 0; i < actions.length; i++) {
+    if (serviceArgv(summary, service, actions[i].key).length)
+      cols.push(actions[i].key);
+  }
+  return cols;
+}
+
+function navServices(out, summary, rows) {
+  var list = navList(rows);
+  if (!list)
+    return;
+  for (var i = 0; i < list.length; i++) {
+    var row = list[i] && typeof list[i] === "object" ? list[i] : {};
+    var service = row.service;
+    var ref = serviceRef(service);
+    if (!ref)
+      continue;
+
+    var cols = navServiceCols(summary, service);
+    if (!cols.length)
+      continue;
+
+    out.push({ key: "svc:" + ref, kind: "service", site: null, service: service, cols: cols });
+  }
+}
+
+// `visible` is Model.visibleSites(...) and `services` is Model.visibleServices(...)
+// — the panel's own draw order, so the cursor cannot drift out of step with what
+// is on screen.
+//
+// Sites then services, which is the dense view read top to bottom. The columns
+// view puts them side by side, so there Down off the last site row lands at the
+// top of the next column rather than below where it started. That is the honest
+// consequence of one linear cursor over a two-column layout, and the
+// alternative — spending Left/Right on moving between columns — would cost the
+// row actions the keys they already use.
+function navRows(summary, visible, services) {
   var v = visible && typeof visible === "object" ? visible : {};
+  var w = services && typeof services === "object" ? services : {};
   var out = [];
   navSites(out, summary, v.serving);
   if (v.collapse)
     out.push({ key: "sites:collapse", kind: "collapse", site: null, cols: ["toggle"] });
   navSites(out, summary, v.parked);
+  navServices(out, summary, w.rows);
+  navServices(out, summary, w.others);
   return out;
 }
 
@@ -300,6 +629,9 @@ function navTarget(rows, key, col) {
   return {
     kind: item.kind,
     site: item.site,
+    // null on every row that is not a service, which is what lets the panel
+    // switch on `kind` alone and never inspect the other field.
+    service: item.service || null,
     action: cols[navClamp(col, 0, cols.length - 1)]
   };
 }

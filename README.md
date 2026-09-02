@@ -14,8 +14,9 @@ Sites, Services and Environment — and *Needs attention* only when there is som
 in either a dense list or three columns, toggled with `Alt+V` and remembered across restarts.
 Clicking a site opens it in the desktop's browser; hovering one reveals three more, in place
 of the PHP version they cover — **a terminal in the project, the project in the file manager,
-the project in the editor**. All three states are verified on screen, and the QML-free logic
-has 148 tests over 10 fixtures.
+the project in the editor**. Reaching a *service* row reveals what you can do about it —
+**start**, or **restart** and **stop**. All of it is verified on screen, and the QML-free logic
+has 191 tests over 11 fixtures.
 
 Each of those three is a HubDev verb (`site:terminal`, `folder`, `edit`), and each resolves
 *your* default rather than naming a program: the terminal from `$TERMINAL`, the file manager
@@ -25,6 +26,22 @@ no output anyone reads, nothing destructive, no chance of a sudo prompt. `Action
 the allowlist and the argv, and node tests it — including the refusals, because `hubdev`
 parses its own flags out of the argv it is handed and a site named `--print` must never
 become one.
+
+**Services start and stop from the row.** A stopped service offers `start`, a running one
+offers `restart` and `stop` — never all three, because the verbs its current state cannot use
+are not drawn as buttons you could press. `stop` arms on the first press and sends on the
+second, because it is the one that leaves something down until a person notices; `restart`
+does not, because it puts the service back by itself. While one runs, its row shows a turning
+spinner and every other button dims — one action at a time, enforced where the process is
+spawned rather than only in the view. One line at the foot of the panel carries whatever there
+is to say: the question, the progress, *"Redis restarted"*, or the reason it did not work,
+taken off HubDev's stdout with its ANSI colour stripped.
+
+Two rules keep that honest, and both are in `Actions.js` under `node --test`. Every press is
+re-checked against the **current** snapshot, not the row the panel is holding — a panel open
+for a minute must not be able to stop something that is already stopped. And a service this
+machine never set up gets no buttons at all: starting one of those is not a start, it is a
+download, which the plan puts out of scope.
 
 **Just start typing.** The panel already holds the keyboard when it opens, so there is no
 field to click into and no shortcut to remember: the first character raises a slim box under
@@ -37,12 +54,14 @@ typing a site's name gets you that site. Parked sites are searched too, which is
 moment the feature has — the collapsed row is exactly what was hiding the one you are looking
 for. `Enter` opens the top match, `Esc` clears the filter and only then closes the panel.
 
-**Or drive it with the arrows.** `↑`/`↓` walk the site rows, `←`/`→` walk that row's actions,
-and `Enter` or `Space` presses whatever the cursor is on — the row itself opens the site, a
-button runs its verb, the collapsed *parked sites* count expands. It works during a search
-too: type three letters, arrow down, go. Rows below the fold scroll into view as the cursor
-reaches them, and the collapsed count is a stop of its own because otherwise the parked sites
-would be unreachable without the mouse.
+**Or drive it with the arrows.** `↑`/`↓` walk the site rows and then the service rows,
+`←`/`→` walk that row's actions, and `Enter` or `Space` presses whatever the cursor is on —
+a site row opens the site, a button runs its verb, the collapsed *parked sites* count expands.
+A service row has no press of its own: a domain is somewhere to go and a service is not, so
+Enter on the row would have to silently pick one of three verbs. It works during a search too:
+type three letters, arrow down, go. Rows below the fold scroll into view as the cursor reaches
+them, and the collapsed count is a stop of its own because otherwise the parked sites would be
+unreachable without the mouse.
 
 **The mouse moves that same cursor** — that is the shell's own `CursorSurface` rule, and rows
 here paint from the cursor rather than from hover, so there is exactly one highlight on screen

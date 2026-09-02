@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
+import "Actions.js" as Actions
 import "Model.js" as Model
 import "Theme.js" as Theme
 // THE TRANSPORT SEAM. Phase 6 swaps this one line for "SourceHttp.js" and
@@ -21,6 +22,19 @@ BarWidget {
   // ---------------------------------------------------------------- state --
   readonly property var summary: internal.summary
   readonly property string level: internal.summary.level
+
+  // The one action in flight, or the one that just refused. Read by the panel
+  // and by every service row: `subject` is the service name, so a row can ask
+  // "is that me?" without the panel having to route anything to it.
+  //
+  //   phase  "idle" | "running" | "done" | "failed"
+  //
+  // `done` says so in one line at the foot of the panel — "Redis restarted" —
+  // and clears itself after three seconds. It was left out of the first cut on
+  // the argument that the dot going green already says it; using the thing
+  // proved otherwise, because the dot you are waiting on is one of eight in a
+  // list, and the thing you are looking at is the button you just pressed.
+  readonly property var actionState: internal.actionState
 
   // SHAPE CONTRACT. `Bar.findPanelWidget` and `Bar.panelNavigationSlots` both
   // skip any slot whose activeItem is missing `open()`, `close()` or `opened`
@@ -54,6 +68,7 @@ BarWidget {
     // The last snapshot document, already merged. Kept because a cheap-tier
     // reply is partial and has to be laid over something.
     property var lastSnapshot: ({})
+    property var actionState: ({ key: "", subject: "", label: "", done: "", phase: "idle", message: "" })
   }
 
   // A summary older than two intervals is shown dimmed rather than replaced:
@@ -150,6 +165,94 @@ BarWidget {
     if (!url)
       return;
     root.runDetached(["omarchy-launch-browser", url]);
+  }
+
+  // ----------------------------------------------------------- run an action --
+  //
+  // The other half of `runDetached`, and everything about it follows from the
+  // fact that this one is NOT detached.
+  //
+  // `service:start` changes the machine and then tells us whether it managed
+  // to. So it gets a `Process` whose exit code is read, a guard timer that can
+  // end it, a state object the panel binds a spinner and a refusal to, and a
+  // burst of refreshes afterwards — because the exit code is only HubDev's
+  // opinion and the snapshot is the answer.
+  //
+  // **One at a time, and the rule is here rather than in the view.** Two
+  // `hubdev` processes writing service state concurrently is not something the
+  // CLI promises to survive, and a second click while the first is running is
+  // far more likely to be impatience than intent. Every button dims while one
+  // is in flight, and this refuses anyway: a guard that only exists in the UI
+  // is a guard that a keyboard shortcut can walk around.
+  //
+  // The argv is built and validated in `Actions.serviceArgv`, which node tests.
+  // This function checks it was handed something and nothing more — the same
+  // division `runDetached` already has.
+  function runAction(request) {
+    var req = request && typeof request === "object" ? request : {};
+    if (!req.argv || !req.argv.length)
+      return false;
+    if (internal.actionState.phase === "running")
+      return false;
+
+    internal.actionState = {
+      key: req.key || "",
+      subject: req.subject || "",
+      label: req.label || "",
+      // What to say once it worked. Passed in rather than derived, because the
+      // wording is Actions.js's business and this file is not allowed to have
+      // any of its own.
+      done: req.doneLabel || "",
+      phase: "running",
+      message: ""
+    };
+    clearDone.stop();
+    clearFailure.stop();
+
+    actionProc.command = req.argv;
+    actionGuard.interval = req.timeoutMs > 0 ? req.timeoutMs : 60000;
+    actionGuard.restart();
+    actionProc.running = true;
+    return true;
+  }
+
+  // Where every ending arrives: exit code, timeout, or a spawn that never
+  // happened. Success is held briefly and said in words at the foot of the
+  // panel; a failure is held for six seconds so it can be read, and then
+  // clears itself rather than waiting to be dismissed — a stale error in a
+  // panel that reopens on a keybind would otherwise be the first thing the
+  // next summon shows.
+  function finishAction(ok, message) {
+    if (ok) {
+      internal.actionState = Object.assign({}, internal.actionState, {
+        phase: "done",
+        message: ""
+      });
+      clearDone.restart();
+    } else {
+      internal.actionState = Object.assign({}, internal.actionState, {
+        phase: "failed",
+        message: message || "It did not work, and HubDev did not say why"
+      });
+      clearFailure.restart();
+    }
+    root.burstRefresh();
+  }
+
+  // A container reports itself running before HubDev's own probe agrees, and a
+  // stop takes as long as the graceful timeout it was given. One refresh on
+  // completion would therefore show the state the action was trying to leave,
+  // which reads exactly like a button that did nothing.
+  //
+  // So: refresh now, then three more times over the next four seconds. Each
+  // tick is coalesced against the polling loop like any other refresh, and a
+  // tick dropped for one already in flight is simply picked up by the next —
+  // which is the reason this is a repeating timer with a counter rather than
+  // three scheduled callbacks.
+  function burstRefresh() {
+    root.refresh("full");
+    burst.left = 3;
+    burst.restart();
   }
 
   function closeForPopoutSwitch() {
@@ -292,6 +395,78 @@ BarWidget {
         snapshotProc.running = false;   // terminates the child
       internal.inFlight = false;
       root.fail("HubDev did not answer in time");
+    }
+  }
+
+  // The action's own Process, kept separate from the snapshot's on purpose.
+  // They have different timeouts, different failure wording and different
+  // lifetimes, and sharing one would mean a refresh landing mid-action could
+  // reassign `command` under a running child.
+  Process {
+    id: actionProc
+    command: ["hubdev", "service:list"]   // replaced per-request
+
+    stdout: StdioCollector {
+      waitForEnd: true
+    }
+
+    onExited: function (exitCode) {
+      actionGuard.stop();
+      // HubDev prints the reason on STDOUT, not stderr, and colours it with
+      // ANSI unconditionally — Actions.parseResult is where both facts live.
+      var result = Actions.parseResult(stdout.text, exitCode);
+      root.finishAction(result.ok, result.message);
+    }
+  }
+
+  // The guard the plan makes mandatory (§5.4, §7.1). Service verbs reach root
+  // through `sudo -n`, which never prompts — but only while HubDev's sudoers
+  // rule is installed. Without it the fallback is `pkexec`, and a polkit dialog
+  // would hold this child open until somebody noticed it. The ceiling is per
+  // verb (Actions.timeoutMs) because a container start and a container stop are
+  // not the same wait.
+  Timer {
+    id: actionGuard
+    repeat: false
+    onTriggered: {
+      if (actionProc.running)
+        actionProc.running = false;   // terminates the child
+      root.finishAction(false, (internal.actionState.label || "That") + " did not finish in time");
+    }
+  }
+
+  Timer {
+    id: clearDone
+    // Shorter than the failure's six seconds on purpose: a confirmation is read
+    // at a glance and a refusal is read twice.
+    interval: 3000
+    repeat: false
+    onTriggered: {
+      if (internal.actionState.phase === "done")
+        internal.actionState = { key: "", subject: "", label: "", done: "", phase: "idle", message: "" };
+    }
+  }
+
+  Timer {
+    id: clearFailure
+    interval: 6000
+    repeat: false
+    onTriggered: {
+      if (internal.actionState.phase === "failed")
+        internal.actionState = { key: "", subject: "", label: "", done: "", phase: "idle", message: "" };
+    }
+  }
+
+  Timer {
+    id: burst
+    interval: 1400
+    repeat: true
+    property int left: 0
+    onTriggered: {
+      root.refresh("full");
+      burst.left -= 1;
+      if (burst.left <= 0)
+        burst.stop();
     }
   }
 

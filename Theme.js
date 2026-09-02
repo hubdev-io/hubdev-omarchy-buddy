@@ -70,7 +70,21 @@ var ICONS = {
   "folder": "",     // nf-fa-folder_open
   "code": "",       // nf-fa-code
   // Type-to-filter. Same range, checked the same way.
-  "search": ""      // nf-fa-search
+  "search": "",     // nf-fa-search
+  // Service row actions. Font Awesome again, and again verified against this
+  // machine's JetBrainsMono Nerd Font cmap rather than a cheatsheet.
+  //
+  // `restart` is deliberately the same codepoint as `refresh`: it is the same
+  // gesture, said about a service instead of about the panel, and inventing a
+  // second circular arrow so the two could differ would only make the row
+  // harder to read.
+  "play": "",       // nf-fa-play
+  "stop": "",       // nf-fa-stop
+  "restart": "",    // nf-fa-refresh
+  // The armed half of a confirm gate. A check, not a warning triangle: the
+  // question has already been asked in words at the foot of the panel, and
+  // what this button now does is answer it.
+  "confirm": ""     // nf-fa-check
 };
 
 function icon(name) {

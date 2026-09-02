@@ -199,20 +199,48 @@ function summarize(snapshot) {
   // ---- services ----------------------------------------------------------
   var svcRows = arr(snap.services).map(function (v) {
     var up = v.status === "running";
-    var installed = v.installed === true;
+    // **`installed` does not mean what its name suggests, and this cost a
+    // shipped bug.** In HubDev it means "starting this would be immediate" —
+    // for a docker service, that the container object exists. HubDev's own
+    // `service:stop` REMOVES the container, so the flag flips to false on
+    // every stop. Verified on the machine: stopping Redis and Mailpit turned
+    // `installed` false for both while their images stayed local.
+    //
+    // Three rules below were reading it as "is this one of my services", and
+    // all three broke the moment Phase 4e handed the user a stop button: the
+    // row dropped out of the Services list into "not set up", its start button
+    // went with it, and the "set to start automatically but is stopped"
+    // warning fell silent — so the bar stayed green with two services down.
+    //
+    // It is now used for exactly what it says, and the two questions it was
+    // being asked instead are answered on their own terms:
+    var immediate = v.installed === true;
     var autoStart = v.auto_start === true;
+    var mode = str(v.mode);
+    // Is this service part of THIS machine's setup? Running, or set to come
+    // up on boot, or immediately startable. Survives a stop, which is the
+    // property the old rule did not have.
+    var configured = up || autoStart || immediate;
+    // Could it be brought up right now without installing a package first? A
+    // docker service always can — worst case it re-pulls an image it already
+    // has. A native one needs its package present, and `immediate` is the only
+    // signal there is for that. This is what keeps a start button off the rows
+    // where pressing it would mean a package install (plan §5.3).
+    var startable = immediate || mode === "docker";
     return {
       name: str(v.name),
       display: str(v.display) || str(v.name),
       up: up,
-      // `broken` is the only thing that earns a warning: a service the user
-      // installed AND asked to start automatically, which is not running.
-      // An uninstalled service with auto_start would otherwise warn forever
-      // about something the user never set up — observed on this machine,
-      // where `reverb` ships auto_start:true and installed:false.
-      broken: autoStart && installed && !up,
-      installed: installed,
-      mode: str(v.mode),
+      // `broken` is the only thing that earns a warning: a service the machine
+      // is set to bring up, which is not running and could be. That last
+      // clause is what keeps `reverb` — auto_start:true, native, no binary —
+      // from warning forever about something never set up, which is the job
+      // `installed` was doing here before it turned out to mean something else.
+      broken: autoStart && startable && !up,
+      immediate: immediate,
+      configured: configured,
+      startable: startable,
+      mode: mode,
       port: num(v.port),
       version: str(v.version),
       autoStart: autoStart
@@ -226,7 +254,9 @@ function summarize(snapshot) {
       upCount++;
     if (svcRows[j].broken)
       brokenNames.push(svcRows[j].display);
-    if (svcRows[j].mode === "docker" && svcRows[j].installed)
+    // A stopped-but-configured docker service still needs Docker to come
+    // back, so this asks `configured` rather than `immediate` too.
+    if (svcRows[j].mode === "docker" && svcRows[j].configured)
       dockerModeEnabled = true;
   }
   s.services = { total: svcRows.length, up: upCount, rows: svcRows };
@@ -238,7 +268,7 @@ function summarize(snapshot) {
   // Docker missing only matters if something actually depends on it.
   if (!s.docker.available && dockerModeEnabled)
     issues.push("Docker is unavailable and " + plural(svcRows.filter(function (v) {
-      return v.mode === "docker" && v.installed;
+      return v.mode === "docker" && v.configured;
     }).length, "service needs", "services need") + " it");
 
   // ---- sites -------------------------------------------------------------
@@ -384,13 +414,20 @@ function siteGroups(s) {
   return { active: active, inactive: inactive, inactiveCount: inactive.length };
 }
 
-// Services split by whether they are set up at all.
+// Services split by whether they are set up here at all.
 //
-// `installed: false` services are offered by HubDev but never configured here —
-// on this machine that is meilisearch, minio and reverb. Listing them as
-// "stopped" alongside real ones reads as three things broken, which is why they
-// collapse behind a count. Broken services (auto-start, installed, stopped)
-// sort first for the same reason routeless sites do.
+// The split is on `configured` — running, or set to come up on boot, or
+// immediately startable — and NOT on `installed`, which is the mistake this
+// used to make. HubDev's `installed` means "starting is immediate", and its own
+// stop removes the container, so splitting on it moved a service into "not set
+// up" the moment you stopped it: the row you had just acted on vanished from
+// the list, taking its start button with it. See the note in summarize().
+//
+// What is left in the collapsed group is the real thing it was always for:
+// services HubDev offers that this machine has never set up — meilisearch and
+// minio here. Listing those as "stopped" alongside real ones reads as things
+// broken, which is why they collapse behind a count. Broken services sort
+// first, for the same reason routeless sites do.
 // The URL a site row opens, or "" if it cannot safely be built.
 //
 // This lives here rather than in the .qml for both of the usual reasons: it is
@@ -468,24 +505,82 @@ function visibleSites(s, search, expanded) {
 }
 
 function serviceGroups(s) {
-  var installed = [];
-  var available = [];
+  var configured = [];
+  var others = [];
   var rows = s && s.services ? s.services.rows : [];
   for (var i = 0; i < rows.length; i++)
-    (rows[i].installed ? installed : available).push(rows[i]);
+    (rows[i].configured ? configured : others).push(rows[i]);
 
-  installed.sort(function (a, b) {
+  configured.sort(function (a, b) {
     if (a.broken !== b.broken)
       return a.broken ? -1 : 1;
     if (a.up !== b.up)
       return a.up ? -1 : 1;
     return a.display < b.display ? -1 : a.display > b.display ? 1 : 0;
   });
-  available.sort(function (a, b) {
+  others.sort(function (a, b) {
     return a.display < b.display ? -1 : a.display > b.display ? 1 : 0;
   });
 
-  return { installed: installed, available: available, availableCount: available.length };
+  return { configured: configured, others: others, otherCount: others.length };
+}
+
+// The service rows the panel draws, in the order it draws them — set up, then
+// the collapsed count, then the ones it hides.
+//
+// The twin of `visibleSites`, and it exists now for the same reason that one
+// did: the Services section grew buttons in Phase 4e, so the keyboard cursor
+// has to walk it, and two files cannot both be the authority on what "the row
+// below this one" means.
+//
+// One asymmetry with sites, and it is deliberate. The parked-sites count is a
+// cursor stop because the rows behind it can be acted on; the "not set up"
+// count is **not**, because the rows behind it cannot — `Actions.serviceArgv`
+// refuses an uninstalled service, so expanding the group from the keyboard
+// would walk the cursor into a group with nothing in it that can be pressed.
+// It stays a mouse-only disclosure, which is what it already was.
+function visibleServices(s, search, expanded) {
+  var q = search && search.active === true;
+
+  if (q) {
+    // Flat and ranked, and it deliberately includes services that are not set
+    // up: the collapsed group is exactly where the thing you cannot find has
+    // been. Their rows simply draw no buttons.
+    var matches = arr(search.services);
+    var found = [];
+    for (var i = 0; i < matches.length; i++) {
+      var m = obj(matches[i]);
+      found.push({ service: m.service, spans: m.spans || [] });
+    }
+    return { rows: found, others: [], collapse: null, searching: true, total: found.length };
+  }
+
+  var g = serviceGroups(s);
+  var rows = [];
+  for (var j = 0; j < g.configured.length; j++)
+    rows.push({ service: g.configured[j], spans: [] });
+
+  var others = [];
+  var collapse = null;
+  if (g.otherCount > 0) {
+    collapse = {
+      count: g.otherCount,
+      expanded: expanded === true,
+      label: g.otherCount + " not set up"
+    };
+    if (expanded === true) {
+      for (var k = 0; k < g.others.length; k++)
+        others.push({ service: g.others[k], spans: [] });
+    }
+  }
+
+  return {
+    rows: rows,
+    others: others,
+    collapse: collapse,
+    searching: false,
+    total: rows.length + others.length
+  };
 }
 
 // -------------------------------------------------------------- search ----
@@ -832,7 +927,7 @@ function envRows(s) {
   // machine running every service natively should not be told Docker is down.
   var dockerNeeded = false;
   for (var d = 0; d < s.services.rows.length; d++) {
-    if (s.services.rows[d].mode === "docker" && s.services.rows[d].installed)
+    if (s.services.rows[d].mode === "docker" && s.services.rows[d].configured)
       dockerNeeded = true;
   }
   rows.push({

@@ -8,9 +8,12 @@ Column {
 
   property var summary: ({})
   property var search: ({ active: false, sites: [], services: [] })
-  // The site rows in draw order (Model.visibleSites) plus the panel's cursor —
-  // Sites is the only section the keyboard walks, so far.
+  // Both lists in draw order (Model.visibleSites / Model.visibleServices), plus
+  // the panel's cursor, which now walks the two of them end to end.
   property var list: ({ serving: [], parked: [], collapse: null, searching: false, total: 0 })
+  property var services: ({ rows: [], others: [], collapse: null, searching: false, total: 0 })
+  property var actionState: ({ phase: "idle", subject: "", key: "" })
+  property string confirmKey: ""
   property string cursorKey: ""
   property int cursorCol: 0
   property color foreground: Color.foreground
@@ -64,9 +67,29 @@ Column {
 
   ServicesSection {
     summary: root.summary
-    search: root.search
+    list: root.services
+    actionState: root.actionState
+    confirmKey: root.confirmKey
+    cursorKey: root.cursorKey
+    cursorCol: root.cursorCol
     foreground: root.foreground
     fontFamily: root.fontFamily
+    onServiceActionRequested: function (service, key) {
+      if (root.panel)
+        root.panel.runServiceAction(service, key);
+    }
+    onCollapseToggled: {
+      if (root.panel)
+        root.panel.servicesExpanded = !root.panel.servicesExpanded;
+    }
+    onCursorRequested: function (key, col) {
+      if (root.panel)
+        root.panel.setCursor(key, col);
+    }
+    onRevealRequested: function (item) {
+      if (root.panel)
+        root.panel.revealRow(item);
+    }
   }
 
   ExtrasSection {
