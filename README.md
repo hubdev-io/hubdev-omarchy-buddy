@@ -104,9 +104,8 @@ the popout hand-off had no `popoutSwitchClosing` to read. Renaming it fixed all 
 parallel against committed fixtures written from `hubdev mcp` output *before* the Go code
 existed — and those fixtures **passed unchanged** against the real implementation.
 
-The verb ships in **HubDev v1.29.0**, which is built and installed here. Against an older
-HubDev the widget still, correctly, reports *"This HubDev is too old — `snapshot --json` is
-not available"*.
+The verb ships in **HubDev v1.29.0**. Against an older HubDev the widget still, correctly,
+reports *"This HubDev is too old — `snapshot --json` is not available"*.
 
 **The panel needed no new CLI.** Every section is built from the Phase 1 contract as shipped —
 including Node's version, which arrives as a health check rather than a field of its own. The

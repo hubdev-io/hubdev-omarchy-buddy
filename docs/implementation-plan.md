@@ -8,9 +8,11 @@ live output to `level: ok`, `Sites 14/15 · Services 5/8`, and clicking the mark
 with Sites, Services, Environment and — only when there is something to say — Needs
 attention, in either a dense list or three columns. R1 is closed, R2 is re-measured under load
 (and forced a tiering revision, §7.2), R3 turned out to be a *different* risk than the one
-written down (§7.1), and R4 — the contract landing late — is moot: **v1.29.0 is built and
-installed locally** (`/usr/local/bin/hubdev`, shadowing the pacman v1.28.0), so the widget is
-reading the real contract.
+written down (§7.1), and R4 — the contract landing late — is closed: `snapshot --json` is
+merged in `devhub-go` and **released in v1.29.0**, and the widget was built and verified
+against its live output. (It was developed against a local build of that code, installed at
+`/usr/local/bin/hubdev`; that shim was removed on 2026-09-02 once the release existed, so
+against the packaged v1.28.0 the bar shows its version gate until v1.29.0 is installed.)
 
 Reference implementation: `lerd Glance` (`~/Projects/Research/lerd-omarchy-glance`)
 HubDev CLI source: `~/Projects/HubDev/devhub-go` (Go 1.25, Wails + Svelte GUI)
