@@ -158,6 +158,47 @@ Panel {
     }
   }
 
+  // Caddy and each PHP-FPM pool, from their Environment rows.
+  //
+  // The twin of `runServiceAction`, and deliberately its twin rather than a
+  // generalisation of it: the two share a shape but not a subject, and folding
+  // them together would mean one function that has to ask what kind of thing it
+  // was handed before it can do anything. `Actions.envArgv` returns [] for a row
+  // that carries no target, so the readout rows in that section drop the press
+  // without this file needing to know which rows those are.
+  //
+  // Stopping Caddy takes every site on the machine offline at once. It is
+  // gated exactly like a service stop — no extra ceremony for the bigger blast
+  // radius, because a gate that escalates by importance is a gate people learn
+  // to click through twice.
+  function runEnvAction(row, key) {
+    var argv = Actions.envArgv(root.summary, row, key);
+    if (!argv.length)
+      return;
+
+    var target = Actions.envTarget(row);
+    var token = Actions.envToken(target, key);
+    var display = Actions.envDisplay(root.summary, row);
+
+    if (Actions.envNeedsConfirm(key) && root.confirmKey !== token) {
+      root.confirmKey = token;
+      confirmTimer.restart();
+      return;
+    }
+
+    root.disarm();
+    if (root.hostWidget && typeof root.hostWidget.runAction === "function") {
+      root.hostWidget.runAction({
+        argv: argv,
+        key: key,
+        subject: target,
+        label: Actions.envActionLabel(key, display),
+        doneLabel: Actions.envDoneLabel(key, display),
+        timeoutMs: Actions.envTimeoutMs(key)
+      });
+    }
+  }
+
   // What the foot of the panel is saying, if anything. One line, four states,
   // in the order they matter: what went wrong, what is being asked, what is
   // happening, what just happened. Empty means the row is not drawn at all.
@@ -193,13 +234,29 @@ Panel {
   readonly property string confirmLabel: {
     if (root.confirmKey === "")
       return "";
+
     var rows = root.summary.services ? root.summary.services.rows : [];
+    var actions = Actions.serviceActions();
     for (var i = 0; i < rows.length; i++) {
       var ref = Actions.serviceRef(rows[i]);
-      var actions = Actions.serviceActions();
       for (var j = 0; j < actions.length; j++) {
         if (Actions.confirmToken(ref, actions[j].key) === root.confirmKey)
           return Actions.serviceActionLabel(actions[j].key, rows[i].display || ref);
+      }
+    }
+
+    // The same sweep over the Environment rows. Searched second because a
+    // service stop is the common case, and the two token namespaces cannot
+    // collide — `svc:` and `env:` — so the order is only about cost.
+    var envs = Model.envRows(root.summary);
+    var envActions = Actions.envActions();
+    for (var m = 0; m < envs.length; m++) {
+      var target = Actions.envTarget(envs[m]);
+      if (!target)
+        continue;
+      for (var n = 0; n < envActions.length; n++) {
+        if (Actions.envToken(target, envActions[n].key) === root.confirmKey)
+          return Actions.envActionLabel(envActions[n].key, Actions.envDisplay(root.summary, envs[m]));
       }
     }
     return "";
@@ -293,12 +350,21 @@ Panel {
   // The same for the services that were never set up. Not a cursor stop —
   // there is nothing runnable behind it — so this one is only ever toggled by
   // a click. See ServicesSection.
-  property bool servicesExpanded: false
+
 
   // The panel's draw order and the cursor's map, from the same three calls.
   readonly property var siteList: Model.visibleSites(root.summary, root.search, root.sitesExpanded)
-  readonly property var serviceList: Model.visibleServices(root.summary, root.search, root.servicesExpanded)
-  readonly property var nav: Actions.navRows(root.summary, root.siteList, root.serviceList)
+  readonly property var serviceList: Model.visibleServices(root.summary, root.search)
+  // The Environment rows, owned here for the same reason the two lists are:
+  // the section draws them and the cursor walks them, and two files cannot both
+  // be the authority on what is on screen.
+  //
+  // Now the third searchable list rather than a section that hid under a query.
+  // `Model.visibleEnv` narrows it to the toggleable rows that matched, so typing
+  // "caddy" reaches the button the same way typing a site name reaches its row.
+  readonly property var envList: Model.visibleEnv(root.summary, root.search)
+
+  readonly property var nav: Actions.navRows(root.summary, root.siteList, root.serviceList, root.envList)
 
   function moveCursor(dx, dy) {
     // Moving off an armed button cancels it. A gate is a question about the
@@ -329,6 +395,8 @@ Panel {
       root.sitesExpanded = !root.sitesExpanded;
     else if (target.kind === "service")
       root.runServiceAction(target.service, target.action);
+    else if (target.kind === "env")
+      root.runEnvAction(target.env, target.action);
     else if (target.action === "open")
       root.openSite(target.site);
     else
@@ -375,6 +443,39 @@ Panel {
   function openHubDev() {
     if (root.bar && typeof root.bar.run === "function")
       root.bar.run("hubdev");
+    root.close();
+  }
+
+  // Whether the footer's second button is an update or the usual refresh.
+  //
+  // Asked of `Actions.updateArgv` rather than of `summary.outdated`, even
+  // though the flag is right there, so that the button can never appear in a
+  // state the click would then refuse. One gate, one answer, and node holds it.
+  readonly property bool canUpdate: Actions.updateArgv(root.summary).length > 0
+
+  // Update HubDev — the footer action that replaces Refresh when the CLI is too
+  // old to answer `snapshot --json` at all.
+  //
+  // Refresh is the wrong offer in that state and always was: it re-asks a
+  // question whose answer cannot change, so the panel spends its one visible
+  // action telling the user again what it just told them. This is the action
+  // that ends the state instead.
+  //
+  // It opens a terminal rather than running anything here. Actions.js carries
+  // the full reasoning; the short version is that the update escalates, takes
+  // minutes, replaces the binary this widget polls, and on Arch moves more than
+  // HubDev alone — so it needs somewhere visible and interruptible to happen,
+  // and this panel is neither.
+  //
+  // Closing afterwards is the same rule as openSite and the row actions: a
+  // terminal window is about to take the screen, and a popout left hanging
+  // behind it reads as a click that did not land.
+  function updateHubDev() {
+    var argv = Actions.updateArgv(root.summary);
+    if (!argv.length)
+      return;
+    if (root.hostWidget && typeof root.hostWidget.runDetached === "function")
+      root.hostWidget.runDetached(argv);
     root.close();
   }
 
@@ -583,6 +684,7 @@ Panel {
               item.search = Qt.binding(function () { return root.search; });
               item.list = Qt.binding(function () { return root.siteList; });
               item.services = Qt.binding(function () { return root.serviceList; });
+              item.envRows = Qt.binding(function () { return root.envList; });
               item.actionState = Qt.binding(function () { return root.actionState; });
               item.confirmKey = Qt.binding(function () { return root.confirmKey; });
               item.cursorKey = Qt.binding(function () { return root.cursorKey; });
@@ -659,15 +761,25 @@ Panel {
             onClicked: root.openHubDev()
           }
 
+          // Refresh, unless refreshing is the one thing that cannot help —
+          // see `canUpdate`. The button is one button in both states rather
+          // than two that take turns being visible: the footer keeps its two
+          // equal halves, and nothing under the pointer moves when a poll
+          // changes the answer.
           Button {
             width: (parent.width - parent.spacing) / 2
-            text: "Refresh"
-            iconText: Theme.icon("refresh")
+            text: root.canUpdate ? "Update HubDev" : "Refresh"
+            iconText: Theme.icon(root.canUpdate ? "update" : "refresh")
             bordered: true
             foreground: root.barForeground
             fontFamily: root.fontFamily
             fontSize: Style.font.bodySmall
-            onClicked: root.refresh()
+            onClicked: {
+              if (root.canUpdate)
+                root.updateHubDev();
+              else
+                root.refresh();
+            }
           }
         }
       }

@@ -2,22 +2,26 @@ import QtQuick
 import qs.Commons
 import "Model.js" as Model
 
-// Services. What is set up here, then everything HubDev offers that was never
-// configured, collapsed — listing those as "stopped" reads as things broken.
+// Services. What is set up on THIS machine, and nothing else.
 //
-// Under a live search this flattens the same way Sites does, and for the same
-// reason: the collapsed group is where the thing you cannot find has been.
+// The catalogue HubDev offers is larger than that, and the difference used to
+// sit here behind a "3 not set up" disclosure. It no longer does. Once the rows
+// grew start/stop buttons, that group became the one place where opening
+// something revealed rows identical to their neighbours that refuse every verb
+// — there is nothing to start, and nothing this panel can do to change that.
+// `Model.visibleServices` drops them; a live search still finds them, which is
+// where a question about one actually gets asked.
 //
-// Like SitesSection, this file no longer decides the order. `Model.visibleServices()`
-// returns the three buckets already in draw order, because the keyboard cursor
-// walks the same order the panel draws and neither could be the authority on it.
+// Under a live search this flattens the same way Sites does, and the row order
+// is not decided here either: `Model.visibleServices()` returns it, because the
+// keyboard cursor walks the order the panel draws and neither could be the
+// authority on it.
 Section {
   id: root
 
   property var summary: ({})
-  // Model.visibleServices(summary, search, expanded) — from the panel, which
-  // owns both the query and whether the unconfigured rows are showing.
-  property var list: ({ rows: [], others: [], collapse: null, searching: false, total: 0 })
+  // Model.visibleServices(summary, search) — from the panel, which owns the query.
+  property var list: ({ rows: [], searching: false, total: 0 })
   property var actionState: ({ phase: "idle", subject: "", key: "" })
   property string confirmKey: ""
   property string cursorKey: ""
@@ -26,56 +30,32 @@ Section {
   // Raised rather than handled: this file knows how to arrange services, not
   // how to run anything. BarWidget.qml is still the only file that does I/O.
   signal serviceActionRequested(var service, string key)
-  signal collapseToggled()
   signal cursorRequested(string key, int col)
   signal revealRequested(var item)
 
   readonly property bool searching: root.list.searching === true
+  // Set up here — the denominator for the resting count, and the test for
+  // whether this section has anything to say at all.
+  readonly property int configured: root.summary.services
+    ? (root.summary.services.configured || 0)
+    : 0
 
   title: "Services"
+  // Searching counts against the whole catalogue, because that is what a search
+  // ranges over and "2/8" is the honest score for it. At rest the denominator is
+  // this machine's own: "5/8" printed beside five rows would invite exactly one
+  // question and answer it wrong.
   count: root.summary.services
     ? (root.searching
       ? root.list.total + "/" + root.summary.services.total
-      : root.summary.services.up + "/" + root.summary.services.total)
+      : root.summary.services.up + "/" + root.configured)
     : ""
-  visible: root.summary.services && root.summary.services.total > 0
-    && (!root.searching || root.list.total > 0)
+  visible: root.searching
+    ? root.list.total > 0
+    : root.configured > 0
 
   Repeater {
     model: root.list.rows
-    ServiceRow {
-      service: modelData.service
-      spans: modelData.spans
-      summary: root.summary
-      actionState: root.actionState
-      confirmKey: root.confirmKey
-      cursorKey: root.cursorKey
-      cursorCol: root.cursorCol
-      foreground: root.foreground
-      fontFamily: root.fontFamily
-      onActionRequested: function (key) { root.serviceActionRequested(modelData.service, key); }
-      onCursorRequested: function (key, col) { root.cursorRequested(key, col); }
-      onRevealRequested: function (item) { root.revealRequested(item); }
-    }
-  }
-
-  // No `navKey`, and that is the one place this section deliberately differs
-  // from Sites. What is behind this count is now only what it always claimed —
-  // services HubDev offers that this machine never set up — and
-  // `Actions.serviceArgv` refuses every verb on those, so a keyboard cursor
-  // that could open the group would be walking into somewhere with nothing to
-  // press. It stays a mouse disclosure, which is what it always was.
-  CollapseRow {
-    visible: root.list.collapse !== null
-    expanded: root.list.collapse ? root.list.collapse.expanded : false
-    label: root.list.collapse ? root.list.collapse.label : ""
-    foreground: root.foreground
-    fontFamily: root.fontFamily
-    onToggled: root.collapseToggled()
-  }
-
-  Repeater {
-    model: root.list.others
     ServiceRow {
       service: modelData.service
       spans: modelData.spans

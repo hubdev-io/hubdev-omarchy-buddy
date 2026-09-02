@@ -372,6 +372,213 @@ function serviceDoneLabel(key, display) {
   return name ? name + " " + past : "Service " + past;
 }
 
+// ------------------------------------------------------------ environment --
+//
+// Caddy and each PHP-FPM pool, started and stopped from their Environment rows.
+//
+// The same machinery as the service verbs — `BarWidget.runAction`, a guard
+// timer, `parseResult`, a confirm gate on `stop` — pointed at a different kind
+// of row. What differs is what the rows ARE, and two of those differences
+// changed the design rather than just the plumbing:
+//
+//   1. **There is no restart.** HubDev has `caddy:start` / `caddy:stop` and
+//      `php:start <v>` / `php:stop <v>`, and no restart verb for either. Two
+//      buttons that mean stop-then-start would be this file inventing a verb
+//      whose failure halfway through it could not describe. A service row has
+//      three buttons and these have two, and that asymmetry is the CLI's.
+//   2. **The subject is a target, not a name.** A service is identified by
+//      something the user typed into HubDev; Caddy and PHP are identified by
+//      what they are. `Model.envRows` stamps `target` on exactly the two rows
+//      that can be acted on, so a health check promoted into this section — DNS,
+//      hosts file, Node — is inert because it carries no target, not because
+//      this file recognised its name.
+//
+// Stopping Caddy is the largest thing this panel can do: every site on the
+// machine stops resolving at once. It goes behind the same two-press gate as a
+// service stop, for the same reason and with no extra ceremony — a gate that
+// escalates by importance is a gate people learn to click through twice.
+var ENV_ACTIONS = [
+  { key: "start", icon: "play", label: "Start", needs: "down", confirm: false, timeout: 45000 },
+  { key: "stop",  icon: "stop", label: "Stop",  needs: "up",   confirm: true,  timeout: 30000 }
+];
+
+// A PHP target names a version, and that version reaches a command line. Two
+// digits groups separated by a dot and nothing else: no flags, no paths, no
+// `..`, and no room for `php:stop --help` to be a "version".
+var ENV_TARGET_RE = /^(caddy|php:\d{1,3}\.\d{1,3})$/;
+
+function envActions() {
+  return ENV_ACTIONS.map(function (a) {
+    return { key: a.key, icon: a.icon, label: a.label };
+  });
+}
+
+function envActionByKey(key) {
+  for (var i = 0; i < ENV_ACTIONS.length; i++) {
+    if (ENV_ACTIONS[i].key === key)
+      return ENV_ACTIONS[i];
+  }
+  return null;
+}
+
+function envNeedsConfirm(key) {
+  var a = envActionByKey(key);
+  return !!a && a.confirm === true;
+}
+
+function envTimeoutMs(key) {
+  var a = envActionByKey(key);
+  return a ? a.timeout : 45000;
+}
+
+// The target as this file will use it, or "" for anything it will not.
+function envTarget(row) {
+  var v = row && typeof row === "object" ? row : {};
+  var t = typeof v.target === "string" ? v.target : (typeof v === "string" ? v : "");
+  return ENV_TARGET_RE.test(t) ? t : "";
+}
+
+// The live state of a target, read out of the CURRENT snapshot rather than out
+// of the row the view is holding — the row is a copy from an earlier poll, and
+// between that poll and this click Caddy may well have stopped. Same rule, and
+// same reason, as `liveService`.
+//
+// Returns null for a target this snapshot cannot account for: a PHP version
+// that has since been uninstalled, or a summary with nothing in it at all.
+function envLive(summary, target) {
+  var s = summary && typeof summary === "object" ? summary : {};
+
+  if (target === "caddy") {
+    var caddy = s.caddy && typeof s.caddy === "object" ? s.caddy : null;
+    if (!caddy)
+      return null;
+    return { kind: "caddy", version: "", display: "Caddy", up: caddy.running === true };
+  }
+
+  var m = /^php:(\d{1,3}\.\d{1,3})$/.exec(typeof target === "string" ? target : "");
+  if (!m)
+    return null;
+  var version = m[1];
+  var rows = s.php && s.php.rows ? s.php.rows : [];
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i] && typeof rows[i] === "object" ? rows[i] : {};
+    if (row.version === version)
+      return { kind: "php", version: version, display: "PHP " + version, up: row.fpmRunning === true };
+  }
+  return null;
+}
+
+// The whole gate, in one function, exactly as `serviceArgv` is for services.
+// [] means nothing is spawned, and nothing downstream re-checks.
+function envArgv(summary, row, key) {
+  var action = envActionByKey(key);
+  if (!action)
+    return [];
+  var target = envTarget(row);
+  if (!target)
+    return [];
+  var live = envLive(summary, target);
+  if (!live)
+    return [];
+  if (action.needs === "up" && live.up !== true)
+    return [];
+  if (action.needs === "down" && live.up === true)
+    return [];
+
+  if (live.kind === "caddy")
+    return [BIN, "caddy:" + key];
+  return [BIN, "php:" + key, live.version];
+}
+
+// The handle for an armed gate on an environment row. Prefixed so it can never
+// collide with a service's — a machine may perfectly well run a service called
+// `caddy`, and two rows sharing one armed token would arm both.
+function envToken(target, key) {
+  var t = typeof target === "string" ? target : "";
+  var k = typeof key === "string" ? key : "";
+  return t === "" || k === "" ? "" : "env:" + t + ":" + k;
+}
+
+// What to call this while it runs, and after it has run.
+function envActionLabel(key, display) {
+  var action = envActionByKey(key);
+  var name = typeof display === "string" ? display : "";
+  if (!action)
+    return name;
+  return name ? action.label + " " + name : action.label;
+}
+
+var ENV_DONE = { start: "started", stop: "stopped" };
+
+function envDoneLabel(key, display) {
+  var word = ENV_DONE[key];
+  var name = typeof display === "string" ? display : "";
+  if (!word)
+    return name;
+  return name ? name + " " + word : word;
+}
+
+// The display name for a target, for a label that has to name it. Taken from
+// the live snapshot so it says "PHP 8.4" whatever the row's own label reads —
+// the row's says "PHP 8.4 (default)", which is a fact about the row and not a
+// name anyone would say out loud.
+function envDisplay(summary, row) {
+  var live = envLive(summary, envTarget(row));
+  return live ? live.display : "";
+}
+
+// ----------------------------------------------------------------- update --
+//
+// The one action the panel can offer when there is no snapshot to act on.
+//
+// When `hubdev` is too old to answer `snapshot --json`, the panel is empty and
+// its footer still says "Refresh" — a button whose only honest outcome is the
+// same refusal again, since no amount of re-asking makes a v1.28 grow a verb it
+// does not have. `Actions.updateArgv` is what that button becomes instead.
+//
+// **It runs in a terminal, and that is the design, not a shortcut.** Three
+// separate reasons, any one of which would be enough:
+//
+//   1. It escalates. `hubdev update` reaches root through `RunPrivileged`
+//      (`sudo -n`, then a blocking `pkexec` dialog). Plan §7.1 is explicit that
+//      such a verb must never be a headless `Process` — the dialog would hang
+//      behind the panel with nothing to answer it.
+//   2. It outlives any guard timer worth setting. A download plus a package
+//      transaction is minutes, and `runAction`'s contract is a hard per-verb
+//      timeout; the only way to keep that promise here would be to break the
+//      update halfway.
+//   3. It replaces the binary the widget is polling, out from under the poll.
+//
+// And the fourth reason, which is the one that actually decided it: on Arch,
+// `hubdev update` delegates to `yay -Syu --noconfirm hubdev-bin`. `-Syu` with a
+// package name is a FULL SYSTEM UPGRADE that also installs that package — so
+// this button moves more than HubDev, and `--noconfirm` means nothing stops to
+// ask. A terminal is where that becomes visible while it happens and
+// interruptible with C-c. A silent spawn would make a bar button the least
+// reversible thing on the desktop. (Raised for HubDev itself as
+// `hubdev-io/devhub-go` issue 12: a targeted update wants `-S`, not `-Syu`.
+// If that lands, the terminal is still right for reasons 1-3 — it just stops
+// being urgent.)
+//
+// `omarchy-launch-tui` is the desktop's own answer to "run this in my
+// terminal", the same deference as `omarchy-launch-browser` for the URL and
+// `omarchy-launch-editor` for the editor. We do not name a terminal.
+var UPDATE_ARGV = ["omarchy-launch-tui", BIN, "update"];
+
+// [] unless the snapshot says HubDev is specifically OUT OF DATE.
+//
+// Not "unreachable": a HubDev that is missing, crashed, or answering nonsense
+// is not helped by an update, and offering one there would be guessing at a
+// cause the widget does not know. `Model.unreachable` sets `outdated` from
+// SourceJson's refusal code, so the one place that can tell the difference is
+// the one place that decides.
+function updateArgv(summary) {
+  var s = summary && typeof summary === "object" ? summary : {};
+  if (s.outdated !== true)
+    return [];
+  return UPDATE_ARGV.slice();
+}
+
 // ---------------------------------------------------------------- result --
 //
 // What came back from running one. This is the counterpart to
@@ -543,26 +750,68 @@ function navServices(out, summary, rows) {
   }
 }
 
+// The cursor columns for one Environment row: each verb that would actually
+// run, and nothing else — the same rule as a service row, and no `"open"`
+// column for the same reason. A row with no target (a promoted health check, the
+// Docker line, the diagnostics roll-up) has no columns and never enters the map.
+function navEnvCols(summary, row) {
+  var cols = [];
+  var actions = envActions();
+  for (var i = 0; i < actions.length; i++) {
+    if (envArgv(summary, row, actions[i].key).length)
+      cols.push(actions[i].key);
+  }
+  return cols;
+}
+
+// `rows` are Model.visibleEnv(...).rows — `{ row, spans }`, the same wrapper
+// shape the site and service lists use, so all three sections hand the map the
+// thing they are drawing rather than something adjacent to it.
+function navEnv(out, summary, rows) {
+  var list = navList(rows);
+  if (!list)
+    return;
+  for (var i = 0; i < list.length; i++) {
+    var entry = list[i] && typeof list[i] === "object" ? list[i] : {};
+    var row = entry.row && typeof entry.row === "object" ? entry.row : {};
+    var target = envTarget(row);
+    if (!target)
+      continue;
+
+    var cols = navEnvCols(summary, row);
+    if (!cols.length)
+      continue;
+
+    out.push({ key: "env:" + target, kind: "env", site: null, service: null, env: row, cols: cols });
+  }
+}
+
 // `visible` is Model.visibleSites(...) and `services` is Model.visibleServices(...)
 // — the panel's own draw order, so the cursor cannot drift out of step with what
 // is on screen.
 //
-// Sites then services, which is the dense view read top to bottom. The columns
-// view puts them side by side, so there Down off the last site row lands at the
-// top of the next column rather than below where it started. That is the honest
-// consequence of one linear cursor over a two-column layout, and the
-// alternative — spending Left/Right on moving between columns — would cost the
-// row actions the keys they already use.
-function navRows(summary, visible, services) {
+// Environment, then sites, then services — the dense view read top to bottom.
+// The columns view puts them side by side, so there Down off the last site row
+// lands at the top of the next column rather than below where it started. That
+// is the honest consequence of one linear cursor over a two-column layout, and
+// the alternative — spending Left/Right on moving between columns — would cost
+// the row actions the keys they already use.
+//
+// All three arguments are the panel's own draw order — Model.visibleEnv,
+// Model.visibleSites, Model.visibleServices — so the cursor cannot walk a row
+// that is not on screen. Under a query that includes the Environment section,
+// which narrows to the toggleable rows that matched rather than hiding.
+function navRows(summary, visible, services, env) {
   var v = visible && typeof visible === "object" ? visible : {};
   var w = services && typeof services === "object" ? services : {};
+  var e = env && typeof env === "object" ? env : {};
   var out = [];
+  navEnv(out, summary, e.rows);
   navSites(out, summary, v.serving);
   if (v.collapse)
     out.push({ key: "sites:collapse", kind: "collapse", site: null, cols: ["toggle"] });
   navSites(out, summary, v.parked);
   navServices(out, summary, w.rows);
-  navServices(out, summary, w.others);
   return out;
 }
 
@@ -629,9 +878,10 @@ function navTarget(rows, key, col) {
   return {
     kind: item.kind,
     site: item.site,
-    // null on every row that is not a service, which is what lets the panel
-    // switch on `kind` alone and never inspect the other field.
+    // null on every row that is not of that kind, which is what lets the panel
+    // switch on `kind` alone and never inspect the other fields.
     service: item.service || null,
+    env: item.env || null,
     action: cols[navClamp(col, 0, cols.length - 1)]
   };
 }

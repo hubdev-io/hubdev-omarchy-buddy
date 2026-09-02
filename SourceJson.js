@@ -47,6 +47,13 @@ function timeoutMs(tier) {
 
 var TOO_OLD = "This HubDev is too old — `snapshot --json` is not available";
 
+// The refusal's machine-readable half. The panel offers a different action for
+// a HubDev that is merely OLD than for one that is missing or broken, and
+// deciding which by matching the prose above would make that wording load
+// bearing — rename the sentence and the button silently reverts. The string is
+// for the user; this is for the code.
+var OUTDATED = "outdated";
+
 // Turn a completed process into a snapshot or a refusal. Never throws — a
 // widget that throws inside the shell process takes the bar with it.
 function parse(stdout, exitCode) {
@@ -55,19 +62,19 @@ function parse(stdout, exitCode) {
   if (exitCode !== 0) {
     // 127 is the shell's "not found"; Qt reports a failed spawn as -1 or -2.
     if (exitCode === 127 || exitCode < 0)
-      return { ok: false, error: "HubDev is not installed" };
+      return { ok: false, error: "HubDev is not installed", code: "missing" };
     // A HubDev predating the contract prints "Unknown command: snapshot"
     // followed by its whole usage screen — on STDOUT — and exits 1.
     // Verified against v1.28.0. That is the version gate, not a crash, and
     // reporting it as "exited with code 1" tells the user nothing actionable.
     if (/unknown command/i.test(out))
-      return { ok: false, error: TOO_OLD };
-    return { ok: false, error: "HubDev exited with code " + exitCode };
+      return { ok: false, error: TOO_OLD, code: OUTDATED };
+    return { ok: false, error: "HubDev exited with code " + exitCode, code: "error" };
   }
 
   var text = out.trim();
   if (!text)
-    return { ok: false, error: "HubDev returned nothing" };
+    return { ok: false, error: "HubDev returned nothing", code: "error" };
 
   var doc;
   try {
@@ -75,11 +82,11 @@ function parse(stdout, exitCode) {
   } catch (e) {
     // Exit 0 with non-JSON means a hubdev that accepted the verb but printed
     // a table instead. Same conclusion, same wording.
-    return { ok: false, error: TOO_OLD };
+    return { ok: false, error: TOO_OLD, code: OUTDATED };
   }
 
   if (!doc || typeof doc !== "object" || Array.isArray(doc))
-    return { ok: false, error: "HubDev returned an unexpected snapshot" };
+    return { ok: false, error: "HubDev returned an unexpected snapshot", code: "error" };
 
   return { ok: true, snapshot: doc };
 }

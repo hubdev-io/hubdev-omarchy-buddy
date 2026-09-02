@@ -23,7 +23,7 @@ function empty() {
     updateAvailable: null,
     level: "down",
     sites: { total: 0, active: 0, rows: [] },
-    services: { total: 0, up: 0, rows: [] },
+    services: { total: 0, configured: 0, up: 0, rows: [] },
     php: { default: "", rows: [] },
     caddy: { running: false, version: "", routes: 0 },
     docker: { available: false, running: 0, exited: 0, reclaimableLabel: "" },
@@ -32,15 +32,26 @@ function empty() {
     backups: { count: 0, sizeLabel: "", lastAt: null },
     license: { plan: "", status: "" },
     issues: [],
-    resources: { shown: false }
+    resources: { shown: false },
+    // Why the panel cannot show anything, when it cannot — and only ever set
+    // for the one cause that has its own answer. See `unreachable`.
+    outdated: false
   };
 }
 
 // The same shape, marked unreachable, carrying exactly one issue that says why.
 // `reason` is shown to the user verbatim, so it must be plain language.
-function unreachable(reason) {
+//
+// `code` is the same refusal said in a way code can branch on, and exactly one
+// value matters: "outdated". A HubDev that is too old is the only failure the
+// panel can DO something about — every other one (not installed, not answering,
+// answering nonsense) leaves nothing to offer but the refresh that is already
+// there. Keeping it a separate argument rather than parsing `reason` is what
+// stops the sentence in SourceJson from becoming an interface.
+function unreachable(reason, code) {
   var s = empty();
   s.issues = [reason || "HubDev is not running"];
+  s.outdated = code === "outdated";
   return s;
 }
 
@@ -259,7 +270,17 @@ function summarize(snapshot) {
     if (svcRows[j].mode === "docker" && svcRows[j].configured)
       dockerModeEnabled = true;
   }
-  s.services = { total: svcRows.length, up: upCount, rows: svcRows };
+  // `total` stays the catalogue — every service HubDev knows about, which is
+  // what a search still ranges over. `configured` is the machine's own: the
+  // ones set up here, and therefore the only ones the panel draws or counts.
+  // The panel shows `up/configured`, because "5/8" beside five rows invites
+  // exactly one question and answers it wrong.
+  var configuredCount = 0;
+  for (var c = 0; c < svcRows.length; c++) {
+    if (svcRows[c].configured)
+      configuredCount++;
+  }
+  s.services = { total: svcRows.length, configured: configuredCount, up: upCount, rows: svcRows };
   if (brokenNames.length === 1)
     issues.push(brokenNames[0] + " is set to start automatically but is stopped");
   else if (brokenNames.length > 1)
@@ -525,34 +546,42 @@ function serviceGroups(s) {
   return { configured: configured, others: others, otherCount: others.length };
 }
 
-// The service rows the panel draws, in the order it draws them — set up, then
-// the collapsed count, then the ones it hides.
+// The service rows the panel draws, in the order it draws them.
 //
 // The twin of `visibleSites`, and it exists now for the same reason that one
 // did: the Services section grew buttons in Phase 4e, so the keyboard cursor
 // has to walk it, and two files cannot both be the authority on what "the row
 // below this one" means.
 //
-// One asymmetry with sites, and it is deliberate. The parked-sites count is a
-// cursor stop because the rows behind it can be acted on; the "not set up"
-// count is **not**, because the rows behind it cannot — `Actions.serviceArgv`
-// refuses an uninstalled service, so expanding the group from the keyboard
-// would walk the cursor into a group with nothing in it that can be pressed.
-// It stays a mouse-only disclosure, which is what it already was.
-function visibleServices(s, search, expanded) {
+// **A service this machine never set up is not drawn at all.** It used to sit
+// behind a "3 not set up" disclosure, which was the right shape while the
+// panel was only a readout — the group answered "where is minio?". Once the
+// rows around it grew start/stop buttons that reading stopped being true: the
+// group became the one place in the panel where opening something reveals
+// rows that look like every other row and refuse every verb, since
+// `Actions.serviceArgv` has nothing to offer a service with no container, no
+// binary and no config. A disclosure whose entire contents are inert is a
+// worse answer than no disclosure.
+//
+// They remain findable, and that is the deliberate half. A live search ranges
+// over the whole catalogue, so typing "minio" still produces the row — telling
+// you it exists but is not set up here, which is the actual answer to the
+// question that made you type it. What is gone is their presence in the
+// resting panel, not their existence.
+function visibleServices(s, search) {
   var q = search && search.active === true;
 
   if (q) {
     // Flat and ranked, and it deliberately includes services that are not set
-    // up: the collapsed group is exactly where the thing you cannot find has
-    // been. Their rows simply draw no buttons.
+    // up — this is now the ONLY place they appear. Their rows draw no buttons,
+    // which is the answer: HubDev offers this, your machine has not set it up.
     var matches = arr(search.services);
     var found = [];
     for (var i = 0; i < matches.length; i++) {
       var m = obj(matches[i]);
       found.push({ service: m.service, spans: m.spans || [] });
     }
-    return { rows: found, others: [], collapse: null, searching: true, total: found.length };
+    return { rows: found, searching: true, total: found.length };
   }
 
   var g = serviceGroups(s);
@@ -560,27 +589,47 @@ function visibleServices(s, search, expanded) {
   for (var j = 0; j < g.configured.length; j++)
     rows.push({ service: g.configured[j], spans: [] });
 
-  var others = [];
-  var collapse = null;
-  if (g.otherCount > 0) {
-    collapse = {
-      count: g.otherCount,
-      expanded: expanded === true,
-      label: g.otherCount + " not set up"
-    };
-    if (expanded === true) {
-      for (var k = 0; k < g.others.length; k++)
-        others.push({ service: g.others[k], spans: [] });
+  return { rows: rows, searching: false, total: rows.length };
+}
+
+// The Environment rows the panel draws, in the order it draws them — the third
+// of the three `visible*` functions, and the same contract as the other two:
+// this is the single authority on what is on screen, and the keyboard map is
+// built from it rather than from a second walk of the same data.
+//
+// At rest that is every row, readings included: the section's job is to say
+// what the machine is doing, and most of what it says cannot be clicked.
+//
+// Under a query it narrows to the toggleable rows that matched. The section
+// used to hide itself entirely while searching — it was not one of the two
+// lists a filter narrowed — and that stopped being true the moment Caddy and
+// PHP grew buttons. A filter exists to reach the thing you want to press, and
+// those are now things you can press.
+function visibleEnv(s, search) {
+  var q = search && search.active === true;
+
+  // Nothing is drawn when HubDev is not answering — the panel replaces every
+  // section with the reason. `envRows` would still synthesise a Caddy line out
+  // of an empty summary, so the guard belongs here, where "what is on screen"
+  // is the question being answered.
+  if (!s || s.reachable !== true)
+    return { rows: [], searching: q, total: 0 };
+
+  if (q) {
+    var matches = arr(search.env);
+    var found = [];
+    for (var i = 0; i < matches.length; i++) {
+      var m = obj(matches[i]);
+      found.push({ row: m.row, spans: m.spans || [] });
     }
+    return { rows: found, searching: true, total: found.length };
   }
 
-  return {
-    rows: rows,
-    others: others,
-    collapse: collapse,
-    searching: false,
-    total: rows.length + others.length
-  };
+  var all = envRows(s);
+  var rows = [];
+  for (var j = 0; j < all.length; j++)
+    rows.push({ row: all[j], spans: [] });
+  return { rows: rows, searching: false, total: rows.length };
 }
 
 // -------------------------------------------------------------- search ----
@@ -749,25 +798,76 @@ function searchServices(s, query) {
   return out;
 }
 
+// The Environment rows a query can reach, which is exactly the ones that can be
+// toggled: Caddy and each PHP-FPM pool.
+//
+// The rest of that section is deliberately unreachable by typing. DNS, the
+// hosts file, Docker, Node, the diagnostics roll-up — they are readings, and a
+// filter that surfaced one would be offering the user a row they cannot do
+// anything with, in a panel narrowed down to the things they can. Carrying the
+// rule on `target` means it is the same rule that decides whether a row draws a
+// button; the two cannot drift apart, because there is only one of them.
+//
+// Matched on the label the panel draws, so highlighting marks the text on
+// screen. The target is the fallback — it is what makes typing `php:8.4` work
+// on a row that reads "PHP 8.4 (default)" — and a match found there carries no
+// spans, for the reason `matchLabel` explains.
+function searchEnv(s, query) {
+  var out = [];
+  if (!s || s.reachable !== true)
+    return out;
+  var rows = envRows(s);
+  for (var i = 0; i < rows.length; i++) {
+    if (!rows[i].target)
+      continue;
+    var m = matchLabel(rows[i].label, rows[i].target, query);
+    if (m) {
+      out.push({
+        row: rows[i],
+        spans: m.spans,
+        score: m.score,
+        // Running sorts above stopped on a tie, the same as a live site or an
+        // up service. For these two row types `ok` is exactly "running".
+        live: rows[i].level === "ok",
+        label: rows[i].label
+      });
+    }
+  }
+  out.sort(byRelevance("label"));
+  return out;
+}
+
 // Everything the panel needs for one keystroke, computed once and handed down.
 // `active` is the switch the whole UI reads: false restores the normal panel,
 // so clearing the query can never leave a section filtered.
 function searchResults(s, query) {
   var q = foldQuery(query);
   if (!q)
-    return { query: "", active: false, sites: [], services: [], total: 0, searched: 0 };
+    return { query: "", active: false, sites: [], services: [], env: [], total: 0, searched: 0 };
 
   var sites = searchSites(s, q);
   var services = searchServices(s, q);
+  var env = searchEnv(s, q);
   var siteTotal = s && s.sites ? s.sites.total : 0;
   var serviceTotal = s && s.services ? s.services.total : 0;
+  // What a query ranged over, not what this section draws: only the toggleable
+  // rows were ever candidates, so only they are counted as searched.
+  var envTotal = 0;
+  if (s && s.reachable === true) {
+    var envRowsAll = envRows(s);
+    for (var e = 0; e < envRowsAll.length; e++) {
+      if (envRowsAll[e].target)
+        envTotal++;
+    }
+  }
   return {
     query: q,
     active: true,
     sites: sites,
     services: services,
-    total: sites.length + services.length,
-    searched: siteTotal + serviceTotal
+    env: env,
+    total: sites.length + services.length + env.length,
+    searched: siteTotal + serviceTotal + envTotal
   };
 }
 
@@ -898,27 +998,45 @@ function envCheckRows(s, after) {
 function envRows(s) {
   var rows = [];
 
+  // Read through `obj`/`arr` rather than straight off the summary. Every real
+  // summary comes from `empty()` and has all four of these, so for most of this
+  // function's life the direct form was fine — but it is now called from
+  // `searchEnv`, which runs on every keystroke inside a QML binding, and a
+  // binding that throws takes the panel with it. The cost is nothing; the
+  // failure mode it removes is a blank bar.
+  var caddy = obj(s && s.caddy);
+  var php = obj(s && s.php);
+  var docker = obj(s && s.docker);
+  var services = obj(s && s.services);
+
   rows.push({
     key: "caddy",
+    // What `Actions.envArgv` acts on. Only the rows that can be started and
+    // stopped carry one, so a promoted health check can never inherit a verb by
+    // happening to be named like a service — identity is declared here, not
+    // guessed from the key downstream.
+    target: "caddy",
     label: "Caddy",
-    value: s.caddy.running
-      ? (s.caddy.version || "running") + " · " + plural(s.caddy.routes, "route", "routes")
+    value: caddy.running
+      ? (caddy.version || "running") + " · " + plural(caddy.routes, "route", "routes")
       : "stopped",
-    level: s.caddy.running ? "ok" : "down"
+    level: caddy.running ? "ok" : "down"
   });
 
   rows = rows.concat(envCheckRows(s, "caddy"));
 
-  for (var i = 0; i < s.php.rows.length; i++) {
-    var php = s.php.rows[i];
+  var phpRows = arr(php.rows);
+  for (var i = 0; i < phpRows.length; i++) {
+    var pool = obj(phpRows[i]);
     rows.push({
-      key: "php-" + php.version,
-      label: "PHP " + php.version + (php.isDefault ? " (default)" : ""),
-      value: php.fpmRunning ? "FPM running" : "FPM stopped",
+      key: "php-" + pool.version,
+      target: "php:" + pool.version,
+      label: "PHP " + pool.version + (pool.isDefault ? " (default)" : ""),
+      value: pool.fpmRunning ? "FPM running" : "FPM stopped",
       // Only the default version failing stops the machine serving. A second
       // version with its pool down is a fact, not a fault — this machine idles
       // with 8.5 stopped and that is not something to colour.
-      level: php.fpmRunning ? "ok" : (php.isDefault ? "down" : "idle")
+      level: pool.fpmRunning ? "ok" : (pool.isDefault ? "down" : "idle")
     });
   }
 
@@ -926,17 +1044,18 @@ function envRows(s) {
   // the same rule summarize() uses to decide whether to raise the issue. A
   // machine running every service natively should not be told Docker is down.
   var dockerNeeded = false;
-  for (var d = 0; d < s.services.rows.length; d++) {
-    if (s.services.rows[d].mode === "docker" && s.services.rows[d].configured)
+  var svc = arr(services.rows);
+  for (var d = 0; d < svc.length; d++) {
+    if (obj(svc[d]).mode === "docker" && obj(svc[d]).configured)
       dockerNeeded = true;
   }
   rows.push({
     key: "docker",
     label: "Docker",
-    value: s.docker.available
-      ? s.docker.running + " running" + (s.docker.exited ? " · " + s.docker.exited + " exited" : "")
+    value: docker.available
+      ? docker.running + " running" + (docker.exited ? " · " + docker.exited + " exited" : "")
       : "unavailable",
-    level: s.docker.available ? "ok" : (dockerNeeded ? "warn" : "idle")
+    level: docker.available ? "ok" : (dockerNeeded ? "warn" : "idle")
   });
 
   rows = rows.concat(envCheckRows(s, "docker"));

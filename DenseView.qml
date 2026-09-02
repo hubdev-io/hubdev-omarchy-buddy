@@ -7,11 +7,14 @@ Column {
   id: root
 
   property var summary: ({})
-  property var search: ({ active: false, sites: [], services: [] })
+  property var search: ({ active: false, sites: [], services: [], env: [] })
   // Both lists in draw order (Model.visibleSites / Model.visibleServices), plus
   // the panel's cursor, which now walks the two of them end to end.
   property var list: ({ serving: [], parked: [], collapse: null, searching: false, total: 0 })
-  property var services: ({ rows: [], others: [], collapse: null, searching: false, total: 0 })
+  property var services: ({ rows: [], searching: false, total: 0 })
+  // Model.visibleEnv(summary, search) from the panel — the third searchable
+  // list, narrowed to what matched while a query is live.
+  property var envRows: ({ rows: [], searching: false, total: 0 })
   property var actionState: ({ phase: "idle", subject: "", key: "" })
   property string confirmKey: ""
   property string cursorKey: ""
@@ -31,9 +34,25 @@ Column {
 
   EnvironmentSection {
     summary: root.summary
-    searching: root.search.active === true
+    list: root.envRows
+    actionState: root.actionState
+    confirmKey: root.confirmKey
+    cursorKey: root.cursorKey
+    cursorCol: root.cursorCol
     foreground: root.foreground
     fontFamily: root.fontFamily
+    onEnvActionRequested: function (row, key) {
+      if (root.panel)
+        root.panel.runEnvAction(row, key);
+    }
+    onCursorRequested: function (key, col) {
+      if (root.panel)
+        root.panel.setCursor(key, col);
+    }
+    onRevealRequested: function (item) {
+      if (root.panel)
+        root.panel.revealRow(item);
+    }
   }
 
   SitesSection {
@@ -77,10 +96,6 @@ Column {
     onServiceActionRequested: function (service, key) {
       if (root.panel)
         root.panel.runServiceAction(service, key);
-    }
-    onCollapseToggled: {
-      if (root.panel)
-        root.panel.servicesExpanded = !root.panel.servicesExpanded;
     }
     onCursorRequested: function (key, col) {
       if (root.panel)

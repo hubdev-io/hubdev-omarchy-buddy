@@ -18,7 +18,7 @@ const NO_SEARCH = { active: false, sites: [], services: [] };
 const listOf = (summary, expanded = false, search = NO_SEARCH) =>
   Model.visibleSites(summary, search, expanded);
 const svcOf = (summary, expanded = false, search = NO_SEARCH) =>
-  Model.visibleServices(summary, search, expanded);
+  Model.visibleServices(summary, search);
 // The whole map: sites, then services. The sweep at the foot of this file walks
 // it end to end, so every service row is covered by the same "no dead ends"
 // assertion the site rows have had since Phase 4c.
@@ -391,44 +391,50 @@ test("a search puts service rows in the map alongside the sites it matched", () 
 
 // ------------------------------------------------------- visibleServices --
 
-test("the service draw order is set up, then the count, then the rest", () => {
-  const collapsed = Model.visibleServices(healthy, NO_SEARCH, false);
-  assert.ok(collapsed.rows.length > 0);
-  assert.equal(collapsed.others.length, 0, "hidden rows are not drawn");
+test("only services set up on this machine are drawn", () => {
+  const list = Model.visibleServices(healthy, NO_SEARCH);
+  assert.ok(list.rows.length > 0);
   // Two, not three: `reverb` is set to auto-start, so it belongs to this
   // machine's setup and is listed — stopped, and with no buttons, because
   // starting it would mean installing a package first.
-  assert.equal(collapsed.collapse.count, 2);
-  assert.equal(collapsed.collapse.expanded, false);
-  assert.match(collapsed.collapse.label, /^2 not set up$/);
-
-  const open = Model.visibleServices(healthy, NO_SEARCH, true);
-  assert.equal(open.rows.length, collapsed.rows.length);
-  assert.equal(open.others.length, 2);
-  assert.equal(open.total, open.rows.length + open.others.length);
+  assert.equal(healthy.services.total - healthy.services.configured, 2);
+  assert.equal(list.rows.length, healthy.services.configured);
+  assert.equal(list.total, list.rows.length);
+  for (const row of list.rows)
+    assert.equal(row.service.configured, true, row.service.name);
 });
 
-test("no collapsed row when every service is set up", () => {
+test("nothing is left behind a disclosure — the group is gone, not collapsed", () => {
+  // The regression this guards: re-adding `others`/`collapse` would put back a
+  // group whose every row refuses every verb. If a future change wants them
+  // visible again, it has to change this test and say why.
+  const list = Model.visibleServices(healthy, NO_SEARCH);
+  assert.equal(list.others, undefined);
+  assert.equal(list.collapse, undefined);
+  assert.ok(!list.rows.some((r) => r.service.name === "minio"));
+  assert.ok(!list.rows.some((r) => r.service.name === "meilisearch"));
+});
+
+test("a machine with no services set up shows no service rows at all", () => {
   const s = Model.summarize(fixture("minimal"));
-  const list = Model.visibleServices(s, NO_SEARCH, false);
-  assert.equal(list.collapse, null);
+  const list = Model.visibleServices(s, NO_SEARCH);
   assert.equal(list.total, 0);
+  assert.equal(list.rows.length, 0);
 });
 
-test("a search flattens the services the same way it flattens the sites", () => {
+test("a search still finds a service this machine never set up", () => {
+  // The deliberate other half. Hiding a name the user typed would read as
+  // broken; the row appears, with no buttons, which is the actual answer.
   const search = Model.searchResults(healthy, "mini");
-  const list = Model.visibleServices(healthy, search, false);
+  const list = Model.visibleServices(healthy, search);
   assert.equal(list.searching, true);
-  assert.equal(list.collapse, null, "the collapsed group is what was hiding it");
-  // minio was never set up, and is found anyway — its row simply draws no
-  // buttons.
   assert.ok(list.rows.some((r) => r.service.name === "minio"));
 });
 
 test("every row carries its own spans, so a view never has to look them up", () => {
   const search = Model.searchResults(healthy, "sql");
-  const list = Model.visibleServices(healthy, search, false);
+  const list = Model.visibleServices(healthy, search);
   for (const row of list.rows) assert.ok(Array.isArray(row.spans));
-  for (const row of Model.visibleServices(healthy, NO_SEARCH, true).rows)
+  for (const row of Model.visibleServices(healthy, NO_SEARCH).rows)
     assert.deepEqual(row.spans, []);
 });

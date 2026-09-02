@@ -279,10 +279,13 @@ test("services are searched too, on the name the row shows", () => {
   assert.ok(hits[0].spans.length > 0);
 });
 
-test("the result counts both lists, and reports what was searched", () => {
+test("the result counts all three lists, and reports what was searched", () => {
   const r = Model.searchResults(summary, "e");
-  assert.equal(r.total, r.sites.length + r.services.length);
-  assert.equal(r.searched, summary.sites.total + summary.services.total);
+  assert.equal(r.total, r.sites.length + r.services.length + r.env.length);
+  // Environment contributes only its toggleable rows — the readings were never
+  // candidates, so counting them as "searched" would overstate the denominator.
+  const togglable = Model.envRows(summary).filter((row) => row.target).length;
+  assert.equal(r.searched, summary.sites.total + summary.services.total + togglable);
   assert.equal(r.query, "e");
 });
 

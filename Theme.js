@@ -84,7 +84,12 @@ var ICONS = {
   // The armed half of a confirm gate. A check, not a warning triangle: the
   // question has already been asked in words at the foot of the panel, and
   // what this button now does is answer it.
-  "confirm": ""     // nf-fa-check
+  "confirm": "",    // nf-fa-check
+  // Update HubDev, offered only when the CLI is too old to answer at all.
+  // Circle-arrow-up rather than a download tray: what the button promises is
+  // a newer HubDev, not a file. Checked against this machine's cmap like the
+  // rest of them.
+  "update": "\uF0AA"   // nf-fa-arrow_circle_up
 };
 
 function icon(name) {

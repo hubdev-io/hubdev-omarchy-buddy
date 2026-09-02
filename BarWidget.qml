@@ -341,14 +341,24 @@ BarWidget {
     root.reschedule();
   }
 
-  function fail(reason) {
+  // `code` is the refusal in a form the panel can branch on, and it is carried
+  // down BOTH paths on purpose. A HubDev that answered fine yesterday and is
+  // too old today — a downgrade, a package rollback — keeps its last good
+  // summary on screen, and the footer should still offer the update that would
+  // fix it. Dropping the code on the stale path would make the offer depend on
+  // whether this widget had ever seen a good snapshot, which is not a fact
+  // about HubDev.
+  function fail(reason, code) {
     internal.consecutiveFailures += 1;
     // Keep the last good summary on screen (dimmed) rather than blanking the
     // bar on one dropped poll. Only give up on it if we never had one.
     if (!internal.everSucceeded)
-      internal.summary = Model.unreachable(reason);
+      internal.summary = Model.unreachable(reason, code);
     else
-      internal.summary = Object.assign({}, internal.summary, { staleReason: reason });
+      internal.summary = Object.assign({}, internal.summary, {
+        staleReason: reason,
+        outdated: code === "outdated"
+      });
     root.reschedule();
   }
 
@@ -379,7 +389,7 @@ BarWidget {
       if (result.ok)
         root.succeed(result.snapshot);
       else
-        root.fail(result.error);
+        root.fail(result.error, result.code);
     }
   }
 

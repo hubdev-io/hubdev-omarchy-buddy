@@ -21,10 +21,16 @@ Section {
 
   Repeater {
     model: root.hasTunnels ? root.summary.tunnels : []
+    // A row object, not three properties: InfoRow reads its label, value and
+    // level off one `row` now, because the Environment rows it also draws carry
+    // a `target` alongside them that decides whether the row can be acted on.
+    // Nothing here carries one, so nothing here grows a button.
     InfoRow {
-      label: "Tunnel · " + (modelData.site || "")
-      value: modelData.running ? "open" : "closed"
-      level: modelData.running ? "ok" : "idle"
+      row: ({
+        label: "Tunnel · " + (modelData.site || ""),
+        value: modelData.running ? "open" : "closed",
+        level: modelData.running ? "ok" : "idle"
+      })
       foreground: root.foreground
       fontFamily: root.fontFamily
     }
@@ -32,10 +38,12 @@ Section {
 
   InfoRow {
     visible: root.hasBackups
-    label: "Backups"
-    value: root.summary.backups.count + (root.summary.backups.sizeLabel
-      ? " · " + root.summary.backups.sizeLabel : "")
-    level: "idle"
+    row: ({
+      label: "Backups",
+      value: root.summary.backups.count + (root.summary.backups.sizeLabel
+        ? " · " + root.summary.backups.sizeLabel : ""),
+      level: "idle"
+    })
     foreground: root.foreground
     fontFamily: root.fontFamily
   }
