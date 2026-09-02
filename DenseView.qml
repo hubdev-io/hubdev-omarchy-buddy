@@ -8,6 +8,11 @@ Column {
 
   property var summary: ({})
   property var search: ({ active: false, sites: [], services: [] })
+  // The site rows in draw order (Model.visibleSites) plus the panel's cursor —
+  // Sites is the only section the keyboard walks, so far.
+  property var list: ({ serving: [], parked: [], collapse: null, searching: false, total: 0 })
+  property string cursorKey: ""
+  property int cursorCol: 0
   property color foreground: Color.foreground
   property string fontFamily: Style.font.family
   property var panel: null
@@ -30,7 +35,9 @@ Column {
 
   SitesSection {
     summary: root.summary
-    search: root.search
+    list: root.list
+    cursorKey: root.cursorKey
+    cursorCol: root.cursorCol
     foreground: root.foreground
     fontFamily: root.fontFamily
     onSiteActivated: function (site) {
@@ -40,6 +47,18 @@ Column {
     onSiteActionRequested: function (site, key) {
       if (root.panel)
         root.panel.runSiteAction(site, key);
+    }
+    onCollapseToggled: {
+      if (root.panel)
+        root.panel.sitesExpanded = !root.panel.sitesExpanded;
+    }
+    onCursorRequested: function (key, col) {
+      if (root.panel)
+        root.panel.setCursor(key, col);
+    }
+    onRevealRequested: function (item) {
+      if (root.panel)
+        root.panel.revealRow(item);
     }
   }
 

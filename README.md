@@ -4,8 +4,8 @@
 > Quattro bar. Sites, services, PHP versions, Caddy and Docker — without raising the GUI.
 
 **Status: Phases 0–3 complete, the first three actions ship, and the panel filters as you
-type. The widget runs in the bar, the contract it reads exists, clicking it opens the panel,
-and a site row hands you the project.**
+type and drives from the keyboard. The widget runs in the bar, the contract it reads exists,
+clicking it opens the panel, and a site row hands you the project.**
 
 Omarchy **Quattro 4.0.2-1** (Quickshell 0.3.1). `io.hubdev.buddy` is installed and rendering:
 a mark that stays quiet when the environment is healthy, gains an **amber dot** when something
@@ -15,7 +15,7 @@ in either a dense list or three columns, toggled with `Alt+V` and remembered acr
 Clicking a site opens it in the desktop's browser; hovering one reveals three more, in place
 of the PHP version they cover — **a terminal in the project, the project in the file manager,
 the project in the editor**. All three states are verified on screen, and the QML-free logic
-has 129 tests over 10 fixtures.
+has 148 tests over 10 fixtures.
 
 Each of those three is a HubDev verb (`site:terminal`, `folder`, `edit`), and each resolves
 *your* default rather than naming a program: the terminal from `$TERMINAL`, the file manager
@@ -36,6 +36,20 @@ Without that bound a subsequence matcher matches half the list on coincidence; w
 typing a site's name gets you that site. Parked sites are searched too, which is the best
 moment the feature has — the collapsed row is exactly what was hiding the one you are looking
 for. `Enter` opens the top match, `Esc` clears the filter and only then closes the panel.
+
+**Or drive it with the arrows.** `↑`/`↓` walk the site rows, `←`/`→` walk that row's actions,
+and `Enter` or `Space` presses whatever the cursor is on — the row itself opens the site, a
+button runs its verb, the collapsed *parked sites* count expands. It works during a search
+too: type three letters, arrow down, go. Rows below the fold scroll into view as the cursor
+reaches them, and the collapsed count is a stop of its own because otherwise the parked sites
+would be unreachable without the mouse.
+
+**The mouse moves that same cursor** — that is the shell's own `CursorSurface` rule, and rows
+here paint from the cursor rather than from hover, so there is exactly one highlight on screen
+no matter which device put it there. The cursor is a *key* (`site:<name>`), never an index:
+the snapshot refreshes underneath the panel every few seconds and a search re-ranks the list on
+every keystroke, so an index would quietly come to mean a different row — the worst possible
+bug for a control that runs things.
 
 **`hubdev snapshot --json` is implemented** in HubDev's own CLI, and the widget's
 `SourceJson.parse()` → `Model.summarize()` reduces its live output to `level: ok`,
@@ -110,7 +124,7 @@ SearchField.qml                   the box that appears with the first keystroke
 DenseView.qml  ColumnsView.qml    two arrangements of the same sections
 *Section.qml                      Sites · Services · Environment · Attention · Extras
 Section.qml  InfoRow.qml  SiteRow.qml  ServiceRow.qml  StatusDot.qml  CollapseRow.qml
-Actions.js                        the argv allowlist: what a click is allowed to run
+Actions.js                        the argv allowlist, and the keyboard's map of what it can reach
 test/                             node --test, harness + 10 fixtures
 tools/hubdev-snapshot             dev-only reference implementation of the contract,
                                   written before the Go one and kept as its acceptance target

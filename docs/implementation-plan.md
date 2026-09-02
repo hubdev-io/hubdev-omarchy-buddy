@@ -300,6 +300,9 @@ columns (~760px), following lerd's proportions. Empty sections are not drawn.
    moment it opens, so this needs no field and no shortcut. It is the answer to the same
    pressure that produced the collapsed-parked-sites rule above: 15 sites is few enough to
    read and too many to scan mid-thought.
+7. **Keyboard cursor** *(added 2026-09-02, Phase 4c)* — arrows walk the site rows and their
+   actions; Enter/Space presses what the cursor is on. The mouse drives the same cursor, per
+   the shell's `CursorSurface` contract, so there is one highlight rather than two.
 
 ### 5.3 Actions
 
@@ -859,6 +862,67 @@ sections gone. Two bugs were found this way and fixed, both invisible to the tes
   deliberately non-Array stand-in. This is the second time the "pure JS, tested under node"
   discipline has been shown to have exactly one blind spot, and it is always this one: the
   boundary itself.
+
+#### Phase 4c — the keyboard cursor ✅ 2026-09-02
+
+Arrows walk the site rows, Left/Right walk that row's actions, Enter or Space presses what the
+cursor is on. The panel already held the keyboard; this is what it does with the keys that are
+not characters.
+
+**The cursor is a key, not an index.** `site:<ref>`, resolved against the map on every read.
+The snapshot refreshes under an open panel every few seconds and a live search re-ranks the
+list on every keystroke — an index would silently come to mean a different row, which is the
+worst available bug for a control whose whole job is running things. A key that no longer
+resolves simply is not a cursor, and the next arrow rebuilds one.
+
+**Two files stopped disagreeing about draw order.** `Model.visibleSites(summary, search,
+expanded)` now returns the three buckets — serving, the collapsed count, parked — already in
+the order the panel draws them. `SitesSection.qml` renders that; `Actions.navRows()` walks it.
+Before this there was no answer to "what is the row below this one" that did not involve
+re-reading the view, and under a search the answer changes on every keystroke. It is now one
+value with tests.
+
+**The map contains only what can actually be pressed.** A row's columns are the row itself
+(when `Model.siteUrl` gives it a URL) followed by each action whose `siteArgv` is non-empty —
+the same gate the buttons dim on. A cursor that can stop somewhere inert is a dead end the
+user discovers by pressing Enter and getting nothing, so those places are not in the map at
+all. `navColOf` is that question asked the other way round, and it is what the button binds
+its `enabled` to, so the two cannot drift.
+
+**The mouse moves the same cursor.** This is `CursorSurface`'s documented contract — *items
+must not read `containsMouse` for colour or border* — and adopting it is what guarantees a
+single highlight across both devices. `SiteRow` and `CollapseRow` were rewritten to paint from
+`hasCursor`/`current`; a pointer entering a row raises `cursorRequested` exactly as an arrow
+key would. `PanelActionButton` already had `hasCursor` for precisely this.
+
+**Clamping, not wrapping,** in both directions, and the column is kept across a vertical move
+(clamped to whatever the new row offers) so that walking down a column of terminal buttons
+works. Clamping is the conservative choice for a list that is re-derived from a refreshing
+snapshot: Down at the bottom does nothing, which is dull and correct.
+
+Two smaller decisions worth their line:
+
+- **Space presses the cursor and has no fallback; Enter has one.** With no cursor, Enter opens
+  the top search match — type three letters and go. Space with no cursor does nothing, because
+  it is also the key somebody hits by accident mid-query, and "opened a browser" is a poor
+  answer to a typo. The matcher folds whitespace out anyway, so a space never meant anything
+  to a search.
+- **The collapsed count is a cursor stop.** Without it the parked sites are unreachable from
+  the keyboard entirely — the row that hides them is the row that has to open them.
+
+- [x] `Model.visibleSites` + `Actions.navRows` / `navMove` / `navTarget` / `navCols`, 19 tests.
+- [x] `KeyCatcher` gains `moveRequested(dx, dy)` — the same signature as the shared component's,
+      so a panel written against one reads the same against the other.
+- [x] `Panel.revealRow()` scrolls the cursor back inside the Flickable.
+
+**Verified on screen (2026-09-02).** The cursor seeded at row 5, column 2 in the *live* copy
+only: the row draws the CursorSurface fill, the PHP version gives way to the three buttons,
+and the folder button alone carries the accent — the row is marked as current, the button as
+having the cursor, and the domain is correctly *not* underlined because Enter would not open
+it from there. Keystroke delivery itself was left for the user to exercise: opening the panel
+over IPC takes the keyboard from whatever they are doing, which is how a previous verification
+pass ate a sentence of their typing.
+
 
 ### Phase 5 — Publish `v1.0`
 

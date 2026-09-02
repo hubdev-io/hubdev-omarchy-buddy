@@ -109,7 +109,15 @@ Panel {
   // A query is a question about what is on screen right now. Reopening the
   // panel asks it again from scratch; leaving yesterday's filter in place would
   // make a panel that opens showing three of fifteen sites and no reason why.
-  onOpenedChanged: root.query = ""
+  onOpenedChanged: {
+    root.query = "";
+    root.clearCursor();
+  }
+
+  // Every keystroke re-ranks the list, so the row the cursor was on is not the
+  // row it would be on now. Dropping it is the honest answer, and it puts
+  // Enter back on the top match — which is what someone still typing means.
+  onQueryChanged: root.clearCursor()
 
   function typeQuery(text) {
     // A cap, not a limit anyone will reach: this is a filter over fifteen rows,
@@ -125,10 +133,81 @@ Panel {
   // Escape means "undo the narrowing", and only then "close". Anything else
   // makes the key that clears a filter also throw the panel away.
   function dismiss() {
-    if (root.query !== "")
+    if (root.cursorKey !== "" || root.query !== "") {
+      root.clearCursor();
       root.query = "";
-    else
+    } else {
       root.close();
+    }
+  }
+
+  // ---------------------------------------------------------------- cursor --
+  //
+  // The keyboard cursor. Up/Down walk the site rows, Left/Right walk the
+  // actions on the row the cursor is on, Enter or Space presses what it is
+  // pointing at.
+  //
+  // Two ideas make this small. The first is that the cursor is a *key*, not an
+  // index: `site:<ref>`, resolved against the map every time. The snapshot
+  // refreshes under the panel every few seconds and a search re-orders
+  // everything on each keystroke — an index would silently come to mean a
+  // different row, which is the worst possible bug for a control that runs
+  // things. A key that no longer exists simply resolves to nothing.
+  //
+  // The second is the shell's own rule, from CursorSurface: **the mouse moves
+  // this same cursor.** Rows paint from `hasCursor`, never from
+  // `containsMouse`, so there is exactly one highlight on screen no matter
+  // which device put it there.
+  property string cursorKey: ""
+  property int cursorCol: 0
+
+  // Which parked sites are showing. Hoisted out of SitesSection because the
+  // cursor has to know whether those rows are drawn before it can walk them,
+  // and because Enter on the collapsed count is what expands it.
+  property bool sitesExpanded: false
+
+  // The panel's draw order and the cursor's map, from the same two calls.
+  readonly property var siteList: Model.visibleSites(root.summary, root.search, root.sitesExpanded)
+  readonly property var nav: Actions.navRows(root.summary, root.siteList)
+
+  function moveCursor(dx, dy) {
+    var next = Actions.navMove(root.nav, root.cursorKey, root.cursorCol, dx, dy);
+    root.cursorKey = next.key;
+    root.cursorCol = next.col;
+  }
+
+  // What a hovering pointer calls. Same state, same paint — see above.
+  function setCursor(key, col) {
+    root.cursorKey = key;
+    root.cursorCol = col;
+  }
+
+  function clearCursor() {
+    root.cursorKey = "";
+    root.cursorCol = 0;
+  }
+
+  // Space: press what the cursor is on, or nothing at all.
+  function activateCursor() {
+    var target = Actions.navTarget(root.nav, root.cursorKey, root.cursorCol);
+    if (!target)
+      return;
+    if (target.kind === "collapse")
+      root.sitesExpanded = !root.sitesExpanded;
+    else if (target.action === "open")
+      root.openSite(target.site);
+    else
+      root.runSiteAction(target.site, target.action);
+  }
+
+  // Enter: the same, but with the one fallback Space is not allowed. With no
+  // cursor and a live search it opens the best match — type three letters,
+  // press Enter, and the site opens without ever touching an arrow key.
+  function activateReturn() {
+    if (root.cursorKey !== "")
+      root.activateCursor();
+    else
+      root.activateTop();
   }
 
   // Enter opens the best match. It is only ever offered when the search has
@@ -137,6 +216,22 @@ Panel {
   function activateTop() {
     if (root.search.active && root.search.sites.length)
       root.openSite(root.search.sites[0].site);
+  }
+
+  // Scroll the cursor back into view. Rows ask for this when they become
+  // current; the panel is the only thing that knows where the fold is.
+  function revealRow(item) {
+    if (!item || !item.height || !body.height)
+      return;
+    var pos = item.mapToItem(content, 0, 0);
+    var pad = Style.space(6);
+    var top = pos.y - pad;
+    var bottom = pos.y + item.height + pad;
+    var limit = Math.max(0, body.contentHeight - body.height);
+    if (top < body.contentY)
+      body.contentY = Math.max(0, Math.min(top, limit));
+    else if (bottom > body.contentY + body.height)
+      body.contentY = Math.max(0, Math.min(bottom - body.height, limit));
   }
 
   // The escape hatch the plan is explicit about: anything long, interactive or
@@ -178,7 +273,9 @@ Panel {
       }
       onTextEntered: function (t) { root.typeQuery(t); }
       onEraseRequested: function (all) { root.eraseQuery(all); }
-      onActivateRequested: root.activateTop()
+      onMoveRequested: function (dx, dy) { root.moveCursor(dx, dy); }
+      onActivateRequested: root.activateCursor()
+      onReturnRequested: root.activateReturn()
       onCommandKey: function (letter) {
         if (letter === "v")
           root.toggleView();
@@ -349,6 +446,9 @@ Panel {
             onLoaded: {
               item.summary = Qt.binding(function () { return root.summary; });
               item.search = Qt.binding(function () { return root.search; });
+              item.list = Qt.binding(function () { return root.siteList; });
+              item.cursorKey = Qt.binding(function () { return root.cursorKey; });
+              item.cursorCol = Qt.binding(function () { return root.cursorCol; });
               item.foreground = Qt.binding(function () { return root.barForeground; });
               item.fontFamily = Qt.binding(function () { return root.fontFamily; });
               item.panel = root;

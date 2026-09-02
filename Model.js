@@ -411,6 +411,62 @@ function siteUrl(site) {
   return (v.tls === true ? "https://" : "http://") + domain;
 }
 
+// The site rows the panel actually draws, in the order it draws them —
+// serving, then the collapsed count, then the parked ones it hides.
+//
+// This exists because two separate things have to agree on that order and
+// neither can be the authority: SitesSection renders it, and the keyboard
+// cursor walks it. While the order lived in the .qml, "what is the row below
+// this one" was a question nothing could answer without re-reading the view,
+// and a search changes the answer completely. Here it is one value, computed
+// once, and node can test it.
+//
+// `url` is resolved here rather than in the row for the same reason: whether a
+// row is openable decides whether the cursor may land on it, and that must be
+// the same answer the row's click gives.
+function visibleSites(s, search, expanded) {
+  var q = search && search.active === true;
+
+  if (q) {
+    // One flat, ranked list: the serving/parked split is dropped, because
+    // finding a parked site is the search's whole point.
+    var matches = arr(search.sites);
+    var found = [];
+    for (var i = 0; i < matches.length; i++) {
+      var m = obj(matches[i]);
+      found.push({ site: m.site, spans: m.spans || [], url: siteUrl(m.site) });
+    }
+    return { serving: found, parked: [], collapse: null, searching: true, total: found.length };
+  }
+
+  var g = siteGroups(s);
+  var serving = [];
+  for (var j = 0; j < g.active.length; j++)
+    serving.push({ site: g.active[j], spans: [], url: siteUrl(g.active[j]) });
+
+  var parked = [];
+  var collapse = null;
+  if (g.inactiveCount > 0) {
+    collapse = {
+      count: g.inactiveCount,
+      expanded: expanded === true,
+      label: plural(g.inactiveCount, "parked site", "parked sites")
+    };
+    if (expanded === true) {
+      for (var k = 0; k < g.inactive.length; k++)
+        parked.push({ site: g.inactive[k], spans: [], url: siteUrl(g.inactive[k]) });
+    }
+  }
+
+  return {
+    serving: serving,
+    parked: parked,
+    collapse: collapse,
+    searching: false,
+    total: serving.length + parked.length
+  };
+}
+
 function serviceGroups(s) {
   var installed = [];
   var available = [];

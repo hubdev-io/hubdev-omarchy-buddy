@@ -143,3 +143,163 @@ function knownSite(summary, ref) {
   }
   return false;
 }
+
+// ------------------------------------------------------------------- keys --
+//
+// Where the keyboard cursor is allowed to be, and how it moves.
+//
+// This lives in Actions.js rather than in a file of its own because the only
+// hard part of building the map is deciding what is *runnable*, and that gate
+// is `siteArgv` — the same one the buttons dim on. A cursor that can stop on
+// something inert is a dead end the user has to discover by pressing Enter and
+// getting nothing, so the map simply does not contain those places.
+//
+// One entry per navigable row, in draw order. `cols` is what Left/Right walks:
+// for a site, the row itself (`"open"`) followed by each action that would
+// actually run; for the collapsed count, the single `"toggle"`.
+
+// Array-like, checked by duck-typing. These lists round-trip through a QML
+// `property var` on the way back in, and that turns a real Array into a
+// QVariantList wrapper: it indexes and it has `.length`, but `Array.isArray`
+// on it is FALSE and its array methods are not there. Index and `.length`
+// only — never `.map`, never `.indexOf`.
+function navList(v) {
+  return v && typeof v === "object" && typeof v.length === "number" ? v : null;
+}
+
+function navClamp(v, lo, hi) {
+  var n = typeof v === "number" && isFinite(v) ? Math.round(v) : 0;
+  return n < lo ? lo : (n > hi ? hi : n);
+}
+
+// The cursor columns for one site row, in order: the row itself when it opens
+// something, then each action that would actually run.
+//
+// The row calls this too, so the buttons and the map are built by the same
+// code rather than by two rules that have to be kept in agreement.
+function navCols(summary, site, url) {
+  // The row itself is a column only when it opens something. Model.siteUrl
+  // already decided that, and this has to give the same answer the click does
+  // or Enter and a click would disagree on the same row.
+  var cols = [];
+  if (typeof url === "string" && url !== "")
+    cols.push("open");
+
+  var actions = siteActions();
+  for (var i = 0; i < actions.length; i++) {
+    if (siteArgv(summary, site, actions[i].key).length)
+      cols.push(actions[i].key);
+  }
+  return cols;
+}
+
+// Where an action sits in those columns, or -1 when it is not one of them —
+// which is also the button's `enabled`, since the two questions are the same.
+function navColOf(cols, key) {
+  var list = navList(cols);
+  if (!list)
+    return -1;
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] === key)
+      return i;
+  }
+  return -1;
+}
+
+function navSites(out, summary, rows) {
+  var list = navList(rows);
+  if (!list)
+    return;
+  for (var i = 0; i < list.length; i++) {
+    var row = list[i] && typeof list[i] === "object" ? list[i] : {};
+    var site = row.site;
+    var ref = siteRef(site);
+    if (!ref)
+      continue;
+
+    var cols = navCols(summary, site, row.url);
+    if (!cols.length)
+      continue;
+
+    out.push({ key: "site:" + ref, kind: "site", site: site, cols: cols });
+  }
+}
+
+// `visible` is Model.visibleSites(...) — the panel's own draw order, so the
+// cursor cannot drift out of step with what is on screen.
+function navRows(summary, visible) {
+  var v = visible && typeof visible === "object" ? visible : {};
+  var out = [];
+  navSites(out, summary, v.serving);
+  if (v.collapse)
+    out.push({ key: "sites:collapse", kind: "collapse", site: null, cols: ["toggle"] });
+  navSites(out, summary, v.parked);
+  return out;
+}
+
+function navIndexOf(rows, key) {
+  var list = navList(rows);
+  if (!list || typeof key !== "string" || key === "")
+    return -1;
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] && list[i].key === key)
+      return i;
+  }
+  return -1;
+}
+
+function navAt(rows, key) {
+  var i = navIndexOf(rows, key);
+  return i < 0 ? null : navList(rows)[i];
+}
+
+// Move, and return where the cursor ends up. Never throws, never lands
+// outside the map, and never invents a row that is not drawn.
+//
+// Deliberately clamps rather than wraps, in both directions. The list is
+// re-derived from a snapshot that refreshes underneath it every few seconds,
+// and clamping is the behaviour that never moves the cursor somewhere the
+// user did not ask for. Down at the bottom does nothing, which is dull and
+// correct.
+function navMove(rows, key, col, dx, dy) {
+  var list = navList(rows);
+  if (!list || !list.length)
+    return { key: "", col: 0 };
+
+  var i = navIndexOf(list, key);
+  if (i < 0) {
+    // No cursor yet. The first arrow creates one at the end it came from, so
+    // Up from nothing lands on the last row rather than jumping to the top.
+    return { key: list[dy < 0 ? list.length - 1 : 0].key, col: 0 };
+  }
+
+  if (dy)
+    i = navClamp(i + (dy > 0 ? 1 : -1), 0, list.length - 1);
+
+  var cols = navList(list[i].cols);
+  var span = cols ? cols.length : 0;
+  // The column is kept across a vertical move and clamped to the new row —
+  // walking down a column of terminal buttons is the point of having one.
+  var c = navClamp(col, 0, span - 1);
+  if (dx)
+    c = navClamp(c + (dx > 0 ? 1 : -1), 0, span - 1);
+
+  return { key: list[i].key, col: c };
+}
+
+// What Enter/Space on (key, col) means, resolved in one place so the panel
+// only has to switch on the answer. null when the cursor points at nothing —
+// a row that has since left the snapshot, most likely.
+function navTarget(rows, key, col) {
+  var item = navAt(rows, key);
+  if (!item)
+    return null;
+  var cols = navList(item.cols);
+  if (!cols || !cols.length)
+    return null;
+  return {
+    kind: item.kind,
+    site: item.site,
+    action: cols[navClamp(col, 0, cols.length - 1)]
+  };
+}
