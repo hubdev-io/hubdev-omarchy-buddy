@@ -1,18 +1,20 @@
 # HubDev Buddy — Omarchy Quattro plugin
 
-**Implementation plan** · 2026-08-31 · **revised 2026-09-01** ·
-**Phases 0–3 complete 2026-09-01**
-Status: **Phases 0, 1, 2 and 3 done. Phase 4 (actions) is next.** The two halves met and the
-panel is on screen: `hubdev snapshot --json` exists in `devhub-go`, the widget reduces its
-live output to `level: ok`, `Sites 14/15 · Services 5/8`, and clicking the mark opens a panel
-with Sites, Services, Environment and — only when there is something to say — Needs
-attention, in either a dense list or three columns. R1 is closed, R2 is re-measured under load
-(and forced a tiering revision, §7.2), R3 turned out to be a *different* risk than the one
-written down (§7.1), and R4 — the contract landing late — is closed: `snapshot --json` is
-merged in `devhub-go` and **released in v1.29.0**, and the widget was built and verified
-against its live output. (It was developed against a local build of that code, installed at
-`/usr/local/bin/hubdev`; that shim was removed on 2026-09-02 once the release existed, so
-against the packaged v1.28.0 the bar shows its version gate until v1.29.0 is installed.)
+**Implementation plan** · 2026-08-31 · **revised 2026-09-02** ·
+**Phases 0–4 complete 2026-09-02**
+Status: **Phases 0, 1, 2, 3 and 4 done. Phase 5 (publish) is what remains.** The two halves met,
+the panel is on screen, and it now acts on the machine: `hubdev snapshot --json` exists in
+`devhub-go`, the widget reduces its live output to `level: ok`,
+`Sites 14/15 · Services 5/6`, and clicking the mark opens a panel with Sites, Services,
+Environment and — only when there is something to say — Needs attention, in either a dense list
+or three columns. Sites open, reveal a terminal, a folder and an editor; services and the
+environment itself start, stop and restart; and every list narrows as you type and drives from
+the keyboard. R1 is closed, R2 is re-measured under load (and forced a tiering revision, §7.2),
+R3 turned out to be a *different* risk than the one written down (§7.1), and R4 — the contract
+landing late — is closed: `snapshot --json` is merged in `devhub-go` and **released in v1.29.0**,
+which is the version installed here since 2026-09-02. (It was developed against a local build of
+that code at `/usr/local/bin/hubdev`; that shim was removed once the release existed, and the
+version gate it briefly exposed is what Phase 4's **Update HubDev** action now answers.)
 
 Reference implementation: `lerd Glance` (`~/Projects/Research/lerd-omarchy-glance`)
 HubDev CLI source: `~/Projects/HubDev/devhub-go` (Go 1.25, Wails + Svelte GUI)
@@ -315,13 +317,13 @@ columns (~760px), following lerd's proportions. Empty sections are not drawn.
 On the row they belong to, revealed on hover, in place of the detail they cover — lerd's
 rule, and it is the right one.
 
-| Row | Verbs | CLI |
-|---|---|---|
-| Site | open · start · stop · folder · terminal | `site:open` `site:start` `site:stop` |
-| Service | start · stop · restart | `service:start\|stop\|restart` |
-| PHP row | start/stop FPM | `php:start\|stop <ver>` |
-| Caddy row | start · stop | `caddy:start\|stop` |
-| Header | Open HubDev GUI · Refresh | `hubdev` (no args) |
+| Row | Verbs | CLI | |
+|---|---|---|---|
+| Site | open · start · stop · folder · terminal | `site:open` `site:start` `site:stop` | ✅ 4a — **less** start/stop, deferred with the parked-site question |
+| Service | start · stop · restart | `service:start\|stop\|restart` | ✅ 4e |
+| PHP row | start/stop FPM | `php:start\|stop <ver>` | ✅ 4f |
+| Caddy row | start · stop | `caddy:start\|stop` | ✅ 4f |
+| Header | Open HubDev GUI · Refresh | `hubdev` (no args) | ✅ — plus **Update HubDev**, which replaces Refresh in the version-gate state |
 
 **Explicitly out of scope for v1**, and the reason:
 
@@ -740,6 +742,14 @@ work from `~/.config/omarchy/plugins`.
       what timed out. The plan's "15s default" was too tight for a container start on this
       machine, and reporting a timeout for something merely slow is worse than waiting.
 - [x] `Actions.js` tests: every row shape → the exact argv, and the refusal cases.
+- [x] The environment's own rows — Caddy and the PHP pools — on the same machinery, and Services
+      cut to what is set up here. **Shipped as Phase 4f (2026-09-02).**
+- [x] Everything toggleable reachable from the type-to-filter. **Shipped as Phase 4g
+      (2026-09-02).**
+
+**Not shipped, deliberately:** `site:start` / `site:stop` on a parked site. The verbs map onto the
+same row shape and `start` would take the empty `open` column slot, but what a parked site *should*
+offer is an open question the user has not settled — so it waits rather than being guessed at.
 
 #### Phase 4a — the three detached site actions ✅ 2026-09-01
 
@@ -1089,6 +1099,98 @@ the panel: both stay listed, both offer `start`, `reverb` is listed with no butt
 automatically but are stopped"*. **Exercised by the user** — stop and restart driven from the
 panel on Mailpit and Redis.
 
+
+#### Phase 4f — the environment verbs, and Services cut to this machine ✅ 2026-09-02
+
+§5.3's last two actionable rows, on the machinery 4e already built. What is new is not the
+plumbing but **how a row earns a verb**.
+
+**Actionability is data on the row, not a name match in the view.** `Model.envRows` stamps a
+`target` — `"caddy"`, `"php:8.4"` — on exactly the two row kinds a verb exists for. DNS, Hosts
+File, Docker, Node.js and Diagnostics carry none, and `InfoRow` derives everything from that one
+field: whether it draws buttons, whether it takes a cursor key, whether search can reach it. The
+alternative — matching on the label — would let a *reading* promoted to its own row later inherit
+a verb by being called the right thing, and that is a bug you would ship without noticing.
+
+**`ENV_TARGET_RE` guards the seam.** A PHP target names a version, and that version becomes a
+command-line argument to `php:start`. The regex `^(caddy|php:\d{1,3}\.\d{1,3})$` is what makes
+"whatever was in the snapshot" safe to hand to a process, and it is the same reasoning that put
+hostname validation in `Model.siteUrl()`.
+
+**Confirm tokens are namespaced.** `env:<target>:<key>` against the services' `svc:<ref>:<key>`,
+so an armed **stop** on Caddy cannot be discharged by a press on a service row. Two independent
+lists with a shared, single-slot gate is exactly where that cross-fire happens.
+
+**Services stopped showing rows it can do nothing about.** The "not set up" disclosure was
+defensible while every row was a readout. Once rows carried buttons it became the one place in the
+panel where opening something revealed rows *identical to their neighbours* that refuse every
+verb — nothing to start, and nothing the panel can do to change that. `visibleServices` lost its
+`expanded` parameter, its `others` bucket and the CollapseRow; `serviceGroups` still computes the
+split, because search still uses it. The count went with it: **`5/6`**, up over *configured*, not
+`5/8` over the catalogue. Five rows printed beside "5/8" invites exactly one question and answers
+it wrong.
+
+- [x] `Actions.js`: `ENV_ACTIONS`, `envArgv`, `envToken`, `envActions`, `envNeedsConfirm`,
+      `envTimeoutMs`, `envLive`, `envTarget`, `envDoneLabel`, `navEnv`, `navRows` over three lists.
+- [x] `Model.js`: `envRows` targets, `visibleEnv`, `visibleServices` without the collapse.
+- [x] `InfoRow.qml` rewritten to the ServiceRow shape; `EnvironmentSection` takes a `list`.
+
+**Verified (2026-09-02).** 37 tests in `test/environment.test.mjs`, 33 in `keyboard`;
+`omarchy plugin validate` exit 0; `qmllint` 0 errors. On the live machine Caddy offers **stop**,
+PHP 8.4 **stop**, PHP 8.5 **start**, and the five readings offer nothing. **Exercised by the
+user** — PHP-FPM and Caddy driven from the panel.
+
+#### Phase 4g — the toggles join the type-to-filter ✅ 2026-09-02
+
+**One field decides two things, so they cannot drift.** `searchEnv` matches only rows carrying a
+`target` — the same flag that decides whether a row draws a button. Typing `docker` or `dns`
+therefore surfaces nothing from Environment: a filter exists to reach the thing you want to press,
+and a readout you cannot act on is not an answer inside a panel narrowed to the ones you can. Two
+separate rules would have been two things to keep in step; there is one.
+
+**The section narrows now instead of hiding.** It used to disappear under any query, on the
+grounds that it was not one of the two lists a filter ranged over. That reasoning expired the
+moment its rows grew buttons.
+
+**A target-fallback match highlights nothing, on purpose.** `php:8.4` matches the target, not the
+label "PHP 8.4 (default)" — the matched characters are not on screen, and the honest-highlighting
+rule is that a highlight may only mark text the reader can actually see. Running sorts above
+stopped on a tie, the same tiebreak Sites and Services use.
+
+**Two defects found by the change, both worth their entries.** `ColumnsView.qml` bound
+`list: root.envRows` without ever declaring the property — invisible in the dense view, and
+`qmllint` says nothing about it (checked deliberately). And `Model.envRows` moved onto a
+per-keystroke path inside a QML binding, where a `TypeError` on a malformed summary stops being
+a loud throw and becomes a section that quietly stops updating; it now reads its inputs through
+the existing `obj()` / `arr()` guards.
+
+**Verified (2026-09-02).** 246 tests total. On the live machine: `caddy` → one row, one button;
+`php` → both pools; `8.5` → that pool alone; `my` → MySQL with no environment noise. After typing
+`caddy` the keyboard map is exactly `env:caddy["stop"]`.
+
+##### 7.8 Reverb reads as stopped outside the process that started it
+
+Found while reviewing the finished panel: the GUI showed Laravel Reverb running, the panel showed
+it down, and the panel was faithfully reporting what it was told.
+
+`hubdev service:list` is wrong in the same way `snapshot --json` is, which locates the defect
+below both. `ReverbNativeProvider.Status()` is `p.cmd != nil && p.cmd.Process != nil` — an
+in-memory handle on the child *that process* spawned. Only the GUI has one. It is the sole native
+provider without cross-process recovery: Mailpit, MeiliSearch and MinIO adopt through a PID file
+and a port scan, the Windows provider through a saved PID and an image match, Redis through
+`systemctl is-active`.
+
+The wrong dot is the mildest symptom. `service:stop reverb` returns **success and does nothing**,
+because `Stop()` early-returns on a nil handle; `service:start reverb` fails with `PORT_IN_USE`
+because the provider cannot see its own daemon. Separately, `installed` is permanently `false` for
+Reverb — `isServiceInstalled` returns false for native providers exposing no `IsInstalled()`, and
+Reverb is the only one without it, though `reverb.SkeletonReady()` already answers the question
+and `Start()` already calls it. That is a different cause from §7.7's, on the same field.
+
+**No plugin change.** All three verbs on the Reverb row already refuse — `start` on
+`startable !== true`, `stop`/`restart` on `needs: "up"` — so the buttons draw dead and the bar
+mark stays green. A port probe here would make the widget disagree with its own data source.
+Raised as `hubdev-io/devhub-go` issue 13.
 
 ### Phase 5 — Publish `v1.0`
 

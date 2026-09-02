@@ -3,9 +3,9 @@
 > The state of your [HubDev](https://hubdev.io) environment at a glance in the Omarchy
 > Quattro bar. Sites, services, PHP versions, Caddy and Docker — without raising the GUI.
 
-**Status: Phases 0–3 complete, the first three actions ship, the panel filters as you type
-and drives from the keyboard, and a key summons it. The widget runs in the bar, the contract
-it reads exists, and a site row hands you the project.**
+**Status: Phases 0–4 complete. The widget runs in the bar, the contract it reads exists, a
+site row hands you the project, and services, Caddy and the PHP pools start and stop from the
+panel — filtered as you type and driven from the keyboard. Phase 5 is publication.**
 
 Omarchy **Quattro 4.0.2-1** (Quickshell 0.3.1). `io.hubdev.buddy` is installed and rendering:
 a mark that stays quiet when the environment is healthy, gains an **amber dot** when something
@@ -16,7 +16,7 @@ Clicking a site opens it in the desktop's browser; hovering one reveals three mo
 of the PHP version they cover — **a terminal in the project, the project in the file manager,
 the project in the editor**. Reaching a *service* row reveals what you can do about it —
 **start**, or **restart** and **stop**. All of it is verified on screen, and the QML-free logic
-has 191 tests over 11 fixtures.
+has 246 tests over 11 fixtures.
 
 Each of those three is a HubDev verb (`site:terminal`, `folder`, `edit`), and each resolves
 *your* default rather than naming a program: the terminal from `$TERMINAL`, the file manager
@@ -43,10 +43,24 @@ for a minute must not be able to stop something that is already stopped. And a s
 machine never set up gets no buttons at all: starting one of those is not a start, it is a
 download, which the plan puts out of scope.
 
+**The environment itself starts and stops too** — the Caddy row and each PHP pool, on the same
+machinery. What earns a row its buttons is a `target` the model stamps on it (`caddy`,
+`php:8.4`), not a match on its label: DNS, the hosts file, Docker, Node and Diagnostics are
+readings, and a reading promoted to its own row later must not be able to inherit a verb by
+being called the right thing. Because the same field decides whether a row can be *found* by
+typing, the two answers cannot drift apart.
+
+**And Services now lists only what is set up here.** The catalogue HubDev offers is larger, and
+that difference used to sit behind a "not set up" disclosure. Once rows carried buttons it
+became the one place where opening something revealed rows identical to their neighbours that
+refuse every verb — so the count reads `5/6` against this machine rather than `5/8` against the
+catalogue. A live search still finds them, which is where a question about one actually gets
+asked.
+
 **Just start typing.** The panel already holds the keyboard when it opens, so there is no
 field to click into and no shortcut to remember: the first character raises a slim box under
-the header and narrows Sites and Services to what matches, with the matched letters marked in
-the accent colour. The match is a *subsequence* — `cpa` finds `clinic-portal-app.test` the way
+the header and narrows Sites, Services and the environment's own toggles to what matches, with
+the matched letters marked in the accent colour. The match is a *subsequence* — `cpa` finds `clinic-portal-app.test` the way
 a launcher would — but a bounded one, which is the part that matters: after the first
 character, every next one must either continue a run or begin a word (`-`, `.`, `_`, `/`).
 Without that bound a subsequence matcher matches half the list on coincidence; with it,
@@ -100,12 +114,15 @@ the popout hand-off had no `popoutSwitchClosing` to read. Renaming it fixed all 
 
 **`hubdev snapshot --json` is implemented** in HubDev's own CLI, and the widget's
 `SourceJson.parse()` → `Model.summarize()` reduces its live output to `level: ok`,
-`Sites 14/15 · Services 5/8 · PHP 8.4 (default) · Caddy 2.11.4`. The two halves were built in
+`Sites 14/15 · Services 5/6 · PHP 8.4 (default) · Caddy 2.11.4`. The two halves were built in
 parallel against committed fixtures written from `hubdev mcp` output *before* the Go code
 existed — and those fixtures **passed unchanged** against the real implementation.
 
 The verb ships in **HubDev v1.29.0**. Against an older HubDev the widget still, correctly,
-reports *"This HubDev is too old — `snapshot --json` is not available"*.
+reports *"This HubDev is too old — `snapshot --json` is not available"* — and in that one state
+the footer's **Refresh**, which could only re-fail, becomes **Update HubDev**. It opens the
+upgrade in a terminal rather than running it detached: on Arch `hubdev update` is a full
+unattended `-Syu` of the whole system, and that must happen somewhere you can watch it.
 
 **The panel needed no new CLI.** Every section is built from the Phase 1 contract as shipped —
 including Node's version, which arrives as a health check rather than a field of its own. The
@@ -171,12 +188,12 @@ DenseView.qml  ColumnsView.qml    two arrangements of the same sections
 *Section.qml                      Sites · Services · Environment · Attention · Extras
 Section.qml  InfoRow.qml  SiteRow.qml  ServiceRow.qml  StatusDot.qml  CollapseRow.qml
 Actions.js                        the argv allowlist, and the keyboard's map of what it can reach
-test/                             node --test, harness + 10 fixtures
+test/                             node --test, harness + 11 fixtures
 tools/hubdev-snapshot             dev-only reference implementation of the contract,
                                   written before the Go one and kept as its acceptance target
                                   ── still to come ──
-(the rest of Phase 4: verbs that need a Process, a guard timer and a confirm gate —
- service start/stop/restart, caddy, php-fpm — plus actionState and the spinner)
+(Phase 5 only: LICENSE, preview.png, CI running validate + qmllint + node --test,
+ and the marketplace submission)
 ```
 
 `test/harness.mjs` loads the real `.js` files into node, stripping only QML's `.pragma`
