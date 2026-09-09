@@ -57,11 +57,25 @@ function unreachable(reason, code) {
 
 // ------------------------------------------------------------- helpers ----
 
+// Hard ceilings on anything that arrives from outside this file.
+//
+// `hubdev snapshot --json` is a local, trusted-ish source, but "trusted-ish" is
+// not a bound: the sections it emits are built from site names, container
+// labels and health-check text, none of which this plugin authors. A snapshot
+// with fifty thousand rows in it — a runaway Docker label, a corrupted config,
+// a future CLI that streams — must be refused a row at a time rather than
+// handed to a Repeater. The caps are applied at the two funnels every field
+// already passes through, so nothing downstream has to remember them.
+var MAX_ITEMS = 512;
+var MAX_STR = 512;
+
 function arr(v) {
   // The CLI emits `null` for empty collections in at least one place
   // (`tunnels` — observed live via `hubdev mcp`), so null-vs-[] is not a
   // distinction worth trusting anywhere.
-  return Array.isArray(v) ? v : [];
+  if (!Array.isArray(v))
+    return [];
+  return v.length > MAX_ITEMS ? v.slice(0, MAX_ITEMS) : v;
 }
 
 function obj(v) {
@@ -73,7 +87,27 @@ function num(v) {
 }
 
 function str(v) {
-  return typeof v === "string" ? v : "";
+  if (typeof v !== "string")
+    return "";
+  return v.length > MAX_STR ? v.slice(0, MAX_STR) : v;
+}
+
+// Text on its way to a sink this plugin does not own.
+//
+// The bar tooltip is rendered by `BarIconButton`, which the shell draws with
+// Qt's default `Text.AutoText` — a string that looks like markup is rendered
+// as markup, and `<img src="http://…">` in a site name would become a real
+// request from the shell process. The plugin cannot set `textFormat` there, so
+// the fix has to be in the string: remove the three characters that can start
+// markup, remove C0/C1 and bidi controls, and cap the length. Every `Text` the
+// plugin owns is pinned to `Text.PlainText` instead; this is only for the
+// handful of host-owned sinks.
+function plain(text, limit) {
+  var cap = typeof limit === "number" && limit > 0 ? limit : MAX_STR;
+  var t = (typeof text === "string" ? text : "")
+    .replace(/[<>&]/g, " ")
+    .replace(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, "");
+  return t.length > cap ? t.slice(0, cap - 1) + "…" : t;
 }
 
 // Bytes as something a bar panel can show. Deliberately coarse — this is a
@@ -1109,7 +1143,7 @@ function versionLabel(version) {
 // words — nothing more when nothing is wrong.
 function tooltip(s) {
   if (!s.reachable)
-    return s.issues.length ? s.issues[0] : "HubDev is not running";
+    return plain(s.issues.length ? s.issues[0] : "HubDev is not running", 2048);
 
   var lines = [
     "Sites " + s.sites.active + "/" + s.sites.total + "  ·  Services " + s.services.up + "/" + s.services.total
@@ -1126,5 +1160,7 @@ function tooltip(s) {
   for (var i = 0; i < s.issues.length; i++)
     lines.push("• " + s.issues[i]);
 
-  return lines.join("\n");
+  // Host-owned sink: the shell renders this with AutoText and the plugin cannot
+  // pin the format, so the markup characters come out here. See plain().
+  return plain(lines.join("\n"), 2048);
 }

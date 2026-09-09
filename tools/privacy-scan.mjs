@@ -15,7 +15,7 @@ import { readFileSync } from "node:fs";
 // list of client names in plaintext would be exactly the leak it exists to
 // prevent -- the first file anyone greps. Tokens are hashed to 16 hex chars
 // and compared; the plaintext mapping lives only in the gitignored
-// `docs/lessons-learned/redaction-map.py`. A hit here tells you *that* a
+// `../hubdev-omarchy-buddy-docs/docs/lessons-learned/redaction-map.py`. A hit here tells you *that* a
 // forbidden token is present and not what it is, which is enough to act on and
 // harmless to publish.
 
@@ -103,7 +103,7 @@ export function scanText(text, file) {
       if (DENY.has(h(t))) {
         found.push({
           file, line: i + 1, rule: "denylisted-token",
-          say: "a client project name — see docs/lessons-learned/redaction-map.py",
+          say: "a client project name — see ../hubdev-omarchy-buddy-docs/docs/lessons-learned/redaction-map.py",
           at: "<redacted: " + h(t).slice(0, 8) + ">"   // never echo the hit itself
         });
       }

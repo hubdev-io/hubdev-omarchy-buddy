@@ -49,12 +49,12 @@ test("the view never receives the argv, and cannot mutate the table", () => {
 
 test("each key produces its exact command line", () => {
   assert.deepEqual(Actions.siteArgv(summary, site, "terminal"), [
-    "hubdev",
+    "/usr/bin/hubdev",
     "site:terminal",
     site.name
   ]);
   assert.deepEqual(Actions.siteArgv(summary, site, "folder"), [
-    "hubdev",
+    "/usr/bin/hubdev",
     "folder",
     site.name
   ]);
@@ -63,7 +63,7 @@ test("each key produces its exact command line", () => {
   // that wants the terminal a bar widget does not have, and opens no window at
   // all. See the comment on the action itself.
   assert.deepEqual(Actions.siteArgv(summary, site, "editor"), [
-    "hubdev",
+    "/usr/bin/hubdev",
     "edit",
     "--ide=omarchy-launch-editor",
     site.name
@@ -74,7 +74,7 @@ test("the site reference is always the last element", () => {
   for (const action of Actions.siteActions()) {
     const argv = Actions.siteArgv(summary, site, action.key);
     assert.equal(argv[argv.length - 1], site.name);
-    assert.equal(argv[0], "hubdev");
+    assert.equal(argv[0], "/usr/bin/hubdev");
   }
 });
 
@@ -178,7 +178,9 @@ test("no argv ever carries anything but the binary, the verb and the label", () 
     const s = Model.summarize(fixture(name));
     for (const row of s.sites.rows) {
       for (const action of Actions.siteActions()) {
-        for (const arg of Actions.siteArgv(s, row, action.key)) {
+        const argv = Actions.siteArgv(s, row, action.key);
+        // Element 0 is the pinned binary and is the only path allowed here.
+        for (const arg of argv.slice(1)) {
           assert.doesNotMatch(arg, /\//, `"${arg}" looks like a path`);
         }
       }

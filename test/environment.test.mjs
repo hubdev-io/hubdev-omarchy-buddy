@@ -111,21 +111,21 @@ test("garbage in the row slot refuses rather than throws", () => {
 // ------------------------------------------------------------------ argv --
 
 test("stopping Caddy is exactly `hubdev caddy:stop`", () => {
-  assert.deepEqual(Actions.envArgv(healthy, caddy, "stop"), ["hubdev", "caddy:stop"]);
+  assert.deepEqual(Actions.envArgv(healthy, caddy, "stop"), ["/usr/bin/hubdev", "caddy:stop"]);
 });
 
 test("starting Caddy is exactly `hubdev caddy:start`", () => {
   assert.deepEqual(Actions.envArgv(caddyDown, envRow(caddyDown, "caddy"), "start"),
-                   ["hubdev", "caddy:start"]);
+                   ["/usr/bin/hubdev", "caddy:start"]);
 });
 
 test("a PHP verb carries its version, as a separate argument", () => {
   // Never interpolated into one string: the version is the only part of this
   // argv that varies, so it is the only part that could ever be wrong.
-  assert.deepEqual(Actions.envArgv(healthy, php84, "stop"), ["hubdev", "php:stop", "8.4"]);
-  assert.deepEqual(Actions.envArgv(healthy, php85, "start"), ["hubdev", "php:start", "8.5"]);
+  assert.deepEqual(Actions.envArgv(healthy, php84, "stop"), ["/usr/bin/hubdev", "php:stop", "8.4"]);
+  assert.deepEqual(Actions.envArgv(healthy, php85, "start"), ["/usr/bin/hubdev", "php:start", "8.5"]);
   assert.deepEqual(Actions.envArgv(fpmDown, envRow(fpmDown, "php:8.4"), "start"),
-                   ["hubdev", "php:start", "8.4"]);
+                   ["/usr/bin/hubdev", "php:start", "8.4"]);
 });
 
 test("the version comes from the snapshot, not from the row the view is holding", () => {
@@ -335,7 +335,7 @@ test("a matched environment row is still pressable from the keyboard", () => {
   assert.ok(hit, "the matched row is in the map");
   const target = Actions.navTarget(rows, hit.key, 0);
   assert.equal(target.kind, "env");
-  assert.deepEqual(Actions.envArgv(healthy, target.env, target.action), ["hubdev", "caddy:stop"]);
+  assert.deepEqual(Actions.envArgv(healthy, target.env, target.action), ["/usr/bin/hubdev", "caddy:stop"]);
 });
 
 test("a query that matches nothing else still shows the section", () => {

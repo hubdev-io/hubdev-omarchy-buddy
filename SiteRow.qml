@@ -123,6 +123,9 @@ Item {
     anchors.leftMargin: Style.space(7)
     anchors.verticalCenter: parent.verticalCenter
     text: Theme.driverGlyph(root.site.driver)
+    // Theme.driverGlyph answers from a closed table, but the format is pinned
+    // anyway — see Mark.qml.
+    textFormat: Text.PlainText
     color: root.foreground
     opacity: 0.45
     font.family: root.fontFamily

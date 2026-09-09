@@ -11,7 +11,16 @@
 // `import "SourceHttp.js" as Source` — provided the replacement exports the
 // same four functions: request(), parse(), intervalFor(), timeoutMs().
 
-var BIN = "hubdev";
+// The absolute path, not the name.
+//
+// A bare `hubdev` resolves through whatever PATH the shell process inherited,
+// and any other process running as this user can prepend a directory to that.
+// It matters more here than in most plugins: the service verbs reach root
+// through HubDev's own NOPASSWD sudoers rule, so "which binary is hubdev"
+// is a question on a privilege path. `hubdev-bin` installs to /usr/bin/hubdev;
+// a HubDev installed anywhere else is reported as missing rather than resolved
+// by search, and the README says so.
+var BIN = "/usr/bin/hubdev";
 
 // Two tiers, and the expensive one never runs at 5s (plan §4.1, revised by the
 // Phase 0 measurements in §7.2).

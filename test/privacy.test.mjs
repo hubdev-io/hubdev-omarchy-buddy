@@ -60,8 +60,8 @@ test("the scanner stays quiet on the redacted fixtures and on prose", () => {
 // denylist has the real names in it. That file is gitignored, so this check
 // covers the developer's machine and skips everywhere else rather than
 // pretending to cover what it cannot see.
-test("the denylist actually contains the names that were removed", { skip: !existsSync("docs/lessons-learned/redaction-map.py") }, () => {
-  const map = readFileSync("docs/lessons-learned/redaction-map.py", "utf8");
+test("the denylist actually contains the names that were removed", { skip: !existsSync("../hubdev-omarchy-buddy-docs/docs/lessons-learned/redaction-map.py") }, () => {
+  const map = readFileSync("../hubdev-omarchy-buddy-docs/docs/lessons-learned/redaction-map.py", "utf8");
   const olds = [...map.matchAll(/\(\s*"([a-z0-9-]+)",\s*"([a-z0-9-]+\.(?:test|lab|craft))"/g)]
     .map((m) => m[2])
     .filter((d) => !d.startsWith("hubdev") && !d.startsWith("terminal-radio"));

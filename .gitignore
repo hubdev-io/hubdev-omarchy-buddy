@@ -1,5 +1,7 @@
-# Local-only know-how notes — never committed
-/docs/lessons-learned/
+# The development record — plan, changelogs, research — lives in its own repository:
+# https://github.com/hubdev-io/hubdev-omarchy-buddy-docs
+# `omarchy plugin add` copies this tree verbatim onto every user's machine, so what is
+# here is the plugin and nothing else. Local-only lessons live with the docs.
 
 # OS / editor noise
 .DS_Store
@@ -10,3 +12,7 @@
 
 # Node (tests)
 node_modules/
+
+# Agent tooling — a lockfile for a skill this repo is reviewed BY, not built with.
+# It has no business on a user's machine, which is what this tree becomes.
+/skills-lock.json

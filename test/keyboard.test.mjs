@@ -377,7 +377,7 @@ test("a machine with nothing running still offers every stopped service a start"
     assert.deepEqual(row.cols, ["start"]);
     const target = Actions.navTarget(rows, row.key, 0);
     assert.deepEqual(Actions.serviceArgv(s, target.service, target.action),
-                     ["hubdev", "service:start", target.service.name]);
+                     ["/usr/bin/hubdev", "service:start", target.service.name]);
   }
 });
 

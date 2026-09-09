@@ -30,6 +30,9 @@ Item {
       // nf-fa-server. A real HubDev mark is a Phase 5 asset; the glyph is
       // honest about being a placeholder without looking like one.
       text: ""
+      // Pinned even on a literal: the invariant a reviewer greps for is "every
+      // Text in the tree names its format", and an exception is a hole in it.
+      textFormat: Text.PlainText
       font.family: Style.font.family
       font.pixelSize: root.glyphSize
       // Chrome inherits the theme (§5.3.1). Only the dot carries state colour.

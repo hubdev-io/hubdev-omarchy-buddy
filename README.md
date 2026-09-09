@@ -16,7 +16,8 @@ Clicking a site opens it in the desktop's browser; hovering one reveals three mo
 of the PHP version they cover — **a terminal in the project, the project in the file manager,
 the project in the editor**. Reaching a *service* row reveals what you can do about it —
 **start**, or **restart** and **stop**. All of it is verified on screen, and the QML-free logic
-has 246 tests over 11 fixtures.
+has 255 tests over 11 fixtures — including a hardening suite that holds the properties the
+marketplace review reads the tree for.
 
 Each of those three is a HubDev verb (`site:terminal`, `folder`, `edit`), and each resolves
 *your* default rather than naming a program: the terminal from `$TERMINAL`, the file manager
@@ -131,12 +132,134 @@ cannot supply is its CPU/memory meter strip: there is no CPU figure at all, and 
 figure costs a Docker stats sample per service, which is not a price a 30-second poll should
 pay. §5.2 replaces it with the Environment column.
 
+## Installing it
+
+You do not need to wait for the plugin marketplace listing — Omarchy installs a plugin from
+any git URL, and this repository is one.
+
+**What you need first**
+
+| | |
+|---|---|
+| Omarchy | **Quattro 4.0.x** or newer (`omarchy version`). The plugin is a Quickshell `bar-widget`; the pre-Quattro Waybar setup cannot host it. |
+| HubDev | **v1.29.0** or newer, installed at `/usr/bin/hubdev` (`hubdev --version`). That is the release where `hubdev snapshot --json` — the one thing the widget reads — shipped. |
+
+Nothing else. No API key, no account, no daemon, no build step, no `sudo` at install time.
+
+**Install**
+
+```bash
+omarchy plugin add https://github.com/hubdev-io/hubdev-omarchy-buddy.git --enable
+```
+
+`--enable` places the mark in the bar's right section straight away. Leave it off if you would
+rather choose the placement yourself:
+
+```bash
+omarchy plugin add https://github.com/hubdev-io/hubdev-omarchy-buddy.git
+omarchy plugin enable io.hubdev.buddy right     # or: left, center
+```
+
+Then restart the shell once, because a newly registered widget is not hot-loaded into a
+running bar:
+
+```bash
+omarchy restart shell
+```
+
+The mark appears in the bar. Click it, or bind a key to the panel:
+
+```lua
+-- ~/.config/hypr/bindings.lua
+o.bind("SUPER CTRL", "H", "omarchy-shell io.hubdev.buddy toggle")
+```
+
+**Updating**
+
+```bash
+omarchy plugin update io.hubdev.buddy
+omarchy restart shell
+```
+
+`omarchy plugin add` clones this repository into `~/.config/omarchy/plugins/io.hubdev.buddy`
+and `update` fast-forwards that clone, so you are always running the commit you can read on
+GitHub. Nothing in the plugin ever updates itself, downloads a binary, or builds anything.
+
+**Two settings**, both in the shell's own widget settings (the bar's context menu, or
+`~/.config/omarchy/shell.json`): how often to poll while the panel is closed, and whether the
+panel opens as a dense list or three columns.
+
+## What it runs, what it touches
+
+The whole of it, so that nothing here needs to be taken on trust:
+
+- **It runs exactly one program: `/usr/bin/hubdev`.** By absolute path, never resolved through
+  `PATH`, and always as an argv array — never a shell command string. Reads are
+  `hubdev snapshot --json --include=…`. Actions are `hubdev service:start|stop|restart <name>`,
+  `hubdev caddy:start|stop`, `hubdev php:start|stop <version>`, and the four detached row
+  verbs (`site:terminal`, `folder`, `edit`, and a URL through `omarchy-launch-browser`).
+  `Actions.js` holds all of it as a literal allowlist, and the tests read that table.
+- **Every child process is bounded and has a deadline.** A read gets 5s (cheap tier) or 15s;
+  each verb has its own ceiling. Output is read in chunks against a byte budget — 1 MiB for a
+  snapshot, 64 KiB for an action — and a child that exceeds it, or misses its deadline, is
+  sent `SIGTERM` and then `SIGKILL` two seconds later. Nothing is left running when the
+  widget is destroyed.
+- **It never asks for a password, and never elevates anything itself.** The service, Caddy and
+  PHP verbs change system state, but the elevation is HubDev's own — its installer adds a
+  NOPASSWD `sudoers` rule for exactly those commands. This plugin adds no rule, ships no
+  helper, and installs nothing into a privileged path. `hubdev site:fix` is deliberately *not*
+  offered, because it is the one verb that rule does not cover.
+- **It makes no network requests of its own.** No endpoint, no telemetry, no analytics. The
+  only thing that reaches the network is HubDev, doing what you asked it to.
+- **It writes nothing outside the shell's own settings.** No state file, no cache, no lock
+  file, no temporary file, no edit to `hyprland.lua` or to any other component's
+  configuration. The two settings above live in `~/.config/omarchy/shell.json`, written by the
+  shell's own API, and nothing else on disk changes.
+- **Nothing sensitive ever reaches a command line.** Site *labels* are passed to `hubdev`, not
+  paths, and a label that could be read as a flag is refused rather than escaped. Filesystem
+  paths, the HubDev license key and the plaintext passwords in HubDev's `services.yml` are
+  never read, never rendered and never serialised.
+- **Every string this plugin draws is plain text.** `textFormat: Text.PlainText` on every
+  `Text` in the tree, so a site or container name can never be interpreted as markup and make
+  the shell fetch a resource. The one sink the plugin does not own — the bar tooltip, which
+  the shell draws itself — has the markup characters stripped out of the string instead.
+- **Loading it does nothing.** Enabling the plugin starts a poll and draws a mark. Every
+  action is a button someone pressed, `stop` takes two presses, and the panel refuses a verb
+  the *current* snapshot says would not apply.
+
+## Removing it
+
+```bash
+omarchy plugin remove io.hubdev.buddy
+omarchy restart shell
+```
+
+That deletes `~/.config/omarchy/plugins/io.hubdev.buddy` and takes the mark out of the bar.
+
+**What survives removal:** the widget's two settings stay behind in
+`~/.config/omarchy/shell.json` until the shell prunes them, which is true of every plugin and
+is the shell's own bookkeeping rather than anything this plugin wrote. Nothing else — there is
+no state directory, no cache, no credential, no systemd unit, no hook, no `sudoers` entry and
+no package installed by this plugin, so there is nothing else to clean up.
+
+**What removal does not touch, on purpose:** HubDev itself, and anything it is running. If you
+started Redis from the panel, Redis is still running afterwards — removing the window you
+looked through is not a reason to stop the thing you were looking at. Uninstall HubDev
+separately if that is what you meant (`hubdev` is packaged as `hubdev-bin`).
+
 ## What is here
 
 | Path | |
 |---|---|
-| [`docs/implementation-plan.md`](docs/implementation-plan.md) | The plan. Architecture, scope, phases, risks, and the adversarial review that reshaped it. |
-| `docs/research/hubdev-buddy-plan.html` | A presentation copy of the same plan, published privately as an Artifact. |
+This repository is the plugin and nothing else: the QML, the three `.js` modules the logic
+lives in, the tests, the README and the licence. `omarchy plugin add` copies a repository
+verbatim into `~/.config/omarchy/plugins/`, so anything here is installed on your machine —
+which is a good reason for there to be very little of it.
+
+**The development record lives in its own repository:**
+[hubdev-omarchy-buddy-docs](https://github.com/hubdev-io/hubdev-omarchy-buddy-docs) — the implementation plan (architecture, scope, phases, risks,
+and the adversarial review that reshaped it), the daily changelogs, and the research. Start
+there if you are reading for *why*; start here if you are reading for *what runs*.
 
 ## The idea
 
@@ -189,18 +312,26 @@ DenseView.qml  ColumnsView.qml    two arrangements of the same sections
 Section.qml  InfoRow.qml  SiteRow.qml  ServiceRow.qml  StatusDot.qml  CollapseRow.qml
 Actions.js                        the argv allowlist, and the keyboard's map of what it can reach
 test/                             node --test, harness + 11 fixtures
+LICENSE                           MIT
 tools/hubdev-snapshot             dev-only reference implementation of the contract,
                                   written before the Go one and kept as its acceptance target
                                   ── still to come ──
-(Phase 5 only: LICENSE, preview.png, CI running validate + qmllint + node --test,
+(Phase 5 only: preview.png, CI running validate + qmllint + node --test,
  and the marketplace submission)
 ```
+
+`test/hardening.test.mjs` is the odd one out: it asserts properties of the *tree* rather than
+of a function — every `Text` names its `textFormat`, no `StdioCollector` exists anywhere,
+`hubdev` is only ever invoked by absolute path — because each of those is something a later
+edit could undo without any test noticing.
 
 `test/harness.mjs` loads the real `.js` files into node, stripping only QML's `.pragma`
 directive, so the tests run exactly what the shell loads and there is no second copy to drift.
 
 ## Reading the plan
 
+The plan itself is in the
+[docs repository](https://github.com/hubdev-io/hubdev-omarchy-buddy-docs/blob/main/docs/implementation-plan.md).
 Start at §3.1 (what the HubDev source confirms) and §4 (the architecture decision), then
 **§7 Phase 0** for what running the spike actually established. **§7.6** is the most useful
 section if you are reading for lessons rather than scope: four things the plan got wrong that
@@ -228,4 +359,4 @@ git config core.hooksPath .githooks
 
 ## License
 
-MIT
+MIT — see [`LICENSE`](LICENSE).

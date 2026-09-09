@@ -441,8 +441,11 @@ Panel {
   // destructive belongs in the GUI, and the panel says so by opening it rather
   // than pretending to be a console.
   function openHubDev() {
-    if (root.bar && typeof root.bar.run === "function")
-      root.bar.run("hubdev");
+    // Through the widget's argv route, not `bar.run()`: the host's helper takes
+    // a *command string* and hands it to a shell, and a plugin that reaches for
+    // a shell for a fixed program has no reason to. `runDetached` passes argv.
+    if (root.hostWidget && typeof root.hostWidget.runDetached === "function")
+      root.hostWidget.runDetached(["/usr/bin/hubdev"]);
     root.close();
   }
 

@@ -22,7 +22,16 @@
 // dialog. Those need `Process`, a guard timer and a confirm gate — the rest of
 // Phase 4 — and they must not be smuggled in by adding a row to this table.
 
-var BIN = "hubdev";
+// The absolute path, not the name.
+//
+// A bare `hubdev` resolves through whatever PATH the shell process inherited,
+// and any other process running as this user can prepend a directory to that.
+// It matters more here than in most plugins: the service verbs reach root
+// through HubDev's own NOPASSWD sudoers rule, so "which binary is hubdev"
+// is a question on a privilege path. `hubdev-bin` installs to /usr/bin/hubdev;
+// a HubDev installed anywhere else is reported as missing rather than resolved
+// by search, and the README says so.
+var BIN = "/usr/bin/hubdev";
 
 // The label handed to `hubdev <verb> <site>`. HubDev matches it against site
 // names and domains (cli_site_open.go: matchSiteByLabel), so either works.

@@ -98,7 +98,7 @@ test("a reachable HubDev is never outdated, whatever else is wrong with it", () 
 
 test("an outdated HubDev is offered an update, as a fixed argv", () => {
   const s = Model.unreachable("This HubDev is too old", "outdated");
-  assert.deepEqual(Actions.updateArgv(s), ["omarchy-launch-tui", "hubdev", "update"]);
+  assert.deepEqual(Actions.updateArgv(s), ["omarchy-launch-tui", "/usr/bin/hubdev", "update"]);
 });
 
 test("the update runs in a terminal, and asks the desktop which one", () => {
@@ -107,7 +107,7 @@ test("the update runs in a terminal, and asks the desktop which one", () => {
   // reason it was written has been lost.
   const argv = Actions.updateArgv(Model.unreachable("old", "outdated"));
   assert.equal(argv[0], "omarchy-launch-tui");
-  assert.equal(argv[1], "hubdev");
+  assert.equal(argv[1], "/usr/bin/hubdev");
   assert.equal(argv[2], "update");
   assert.equal(argv.length, 3);
 });
@@ -136,7 +136,7 @@ test("each call gets its own array, so a caller cannot poison the next one", () 
   const first = Actions.updateArgv(s);
   first.push("--force");
   first[0] = "rm";
-  assert.deepEqual(Actions.updateArgv(s), ["omarchy-launch-tui", "hubdev", "update"]);
+  assert.deepEqual(Actions.updateArgv(s), ["omarchy-launch-tui", "/usr/bin/hubdev", "update"]);
 });
 
 test("no element could be read as a flag, a path or a shell fragment", () => {
@@ -145,7 +145,9 @@ test("no element could be read as a flag, a path or a shell fragment", () => {
   // argv, and this array is constant, so the property is cheap to just hold.
   for (const a of Actions.updateArgv(Model.unreachable("old", "outdated"))) {
     assert.equal(typeof a, "string");
-    assert.match(a, /^[A-Za-z][A-Za-z0-9-]*$/, a);
+    // The binary is pinned to an absolute path (see Actions.BIN); everything
+    // else stays a bare word that no parser could read as a flag.
+    assert.match(a, /^(\/usr\/bin\/hubdev|[A-Za-z][A-Za-z0-9-]*)$/, a);
   }
 });
 

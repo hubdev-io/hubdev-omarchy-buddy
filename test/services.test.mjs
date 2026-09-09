@@ -60,17 +60,17 @@ test("the view never receives the argv, and cannot mutate the table", () => {
 
 test("each key produces its exact command line", () => {
   assert.deepEqual(Actions.serviceArgv(healthy, running, "stop"), [
-    "hubdev",
+    "/usr/bin/hubdev",
     "service:stop",
     "mysql"
   ]);
   assert.deepEqual(Actions.serviceArgv(healthy, running, "restart"), [
-    "hubdev",
+    "/usr/bin/hubdev",
     "service:restart",
     "mysql"
   ]);
   assert.deepEqual(Actions.serviceArgv(mixed, down, "start"), [
-    "hubdev",
+    "/usr/bin/hubdev",
     "service:start",
     "redis"
   ]);
@@ -79,7 +79,7 @@ test("each key produces its exact command line", () => {
 test("the service name is always the last element, and hubdev the first", () => {
   for (const key of ["restart", "stop"]) {
     const argv = Actions.serviceArgv(healthy, running, key);
-    assert.equal(argv[0], "hubdev");
+    assert.equal(argv[0], "/usr/bin/hubdev");
     assert.equal(argv[argv.length - 1], "mysql");
   }
 });
@@ -120,7 +120,7 @@ test("a service HubDev's own stop removed the container for can be started again
     const row = s.services.rows.find((r) => r.name === name);
     assert.equal(row.immediate, false, "HubDev removed the container");
     assert.deepEqual(Actions.serviceArgv(s, row, "start"),
-                     ["hubdev", "service:start", name]);
+                     ["/usr/bin/hubdev", "service:start", name]);
   }
 });
 
@@ -149,7 +149,7 @@ test("a stale row is judged by the snapshot, not by itself", () => {
   assert.equal(staleRow.up, true);
   assert.deepEqual(Actions.serviceArgv(stopped, staleRow, "stop"), []);
   assert.deepEqual(Actions.serviceArgv(stopped, staleRow, "start"), [
-    "hubdev",
+    "/usr/bin/hubdev",
     "service:start",
     "redis"
   ]);
@@ -318,7 +318,8 @@ test("no service argv ever carries anything but the binary, the verb and the nam
     for (const row of s.services.rows) {
       for (const action of Actions.serviceActions()) {
         const argv = Actions.serviceArgv(s, row, action.key);
-        for (const arg of argv) assert.doesNotMatch(arg, /\//, `"${arg}" looks like a path`);
+        // Element 0 is the pinned binary and is the only path allowed here.
+        for (const arg of argv.slice(1)) assert.doesNotMatch(arg, /\//, `"${arg}" looks like a path`);
         if (argv.length) assert.equal(argv.length, 3);
       }
     }

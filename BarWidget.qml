@@ -69,7 +69,22 @@ BarWidget {
     // reply is partial and has to be laid over something.
     property var lastSnapshot: ({})
     property var actionState: ({ key: "", subject: "", label: "", done: "", phase: "idle", message: "" })
+    // Accumulators for the two Processes. See the SplitParser comment below for
+    // why the output is assembled here rather than by a StdioCollector.
+    property string snapshotOut: ""
+    property string actionOut: ""
+    property bool snapshotOverflow: false
+    property bool actionOverflow: false
   }
+
+  // The ceiling on anything a child process may hand this widget.
+  //
+  // A full snapshot of a busy machine measured ~14 KB, so 1 MiB is two orders
+  // of magnitude of headroom and still a bound. An action prints one line; 64
+  // KiB is generous for that and small enough that a `hubdev` which decided to
+  // stream would be cut off long before the shell felt it.
+  readonly property int snapshotMaxBytes: 1048576
+  readonly property int actionMaxBytes: 65536
 
   // A summary older than two intervals is shown dimmed rather than replaced:
   // the last true numbers beat no numbers, as long as we say they are stale.
@@ -208,6 +223,8 @@ BarWidget {
     };
     clearDone.stop();
     clearFailure.stop();
+    internal.actionOut = "";
+    internal.actionOverflow = false;
 
     actionProc.command = req.argv;
     actionGuard.interval = req.timeoutMs > 0 ? req.timeoutMs : 60000;
@@ -321,6 +338,8 @@ BarWidget {
     }
     internal.pendingTier = req.tier;
     internal.inFlight = true;
+    internal.snapshotOut = "";
+    internal.snapshotOverflow = false;
     snapshotProc.command = req.argv;
     guard.interval = Source.timeoutMs(req.tier);
     guard.restart();
@@ -376,16 +395,49 @@ BarWidget {
 
   Process {
     id: snapshotProc
-    command: ["hubdev", "snapshot", "--json"]   // replaced per-request
+    command: ["/usr/bin/hubdev", "snapshot", "--json"]   // replaced per-request
 
-    stdout: StdioCollector {
-      waitForEnd: true
+    // Not a StdioCollector, and the difference is the whole point.
+    //
+    // `StdioCollector` retains the child's complete stdout before anything can
+    // look at its length, so a `hubdev` that streamed — a bug, a runaway Docker
+    // label, a future subcommand — would allocate without bound *inside the
+    // shell process that draws the whole desktop*. A cap checked after the
+    // bytes are in memory is a cap applied too late.
+    //
+    // `SplitParser` with an empty marker delivers raw chunks instead, so the
+    // budget is enforced while the child is still running: over the ceiling,
+    // the buffer is dropped, the child is TERMed, and killTimer escalates to
+    // KILL if it does not go. The read is failed rather than truncated —
+    // half a JSON document is not a smaller snapshot, it is a wrong one.
+    stdout: SplitParser {
+      splitMarker: ""
+      onRead: function (chunk) {
+        if (internal.snapshotOverflow)
+          return;
+        internal.snapshotOut += chunk;
+        if (internal.snapshotOut.length > root.snapshotMaxBytes) {
+          internal.snapshotOverflow = true;
+          internal.snapshotOut = "";
+          snapshotProc.signal(15);
+          snapshotKill.restart();
+        }
+      }
     }
 
     onExited: function (exitCode) {
       guard.stop();
+      snapshotKill.stop();
       internal.inFlight = false;
-      var result = Source.parse(stdout.text, exitCode);
+      var out = internal.snapshotOut;
+      var overflowed = internal.snapshotOverflow;
+      internal.snapshotOut = "";
+      internal.snapshotOverflow = false;
+      if (overflowed) {
+        root.fail("HubDev returned more output than this widget will read");
+        return;
+      }
+      var result = Source.parse(out, exitCode);
       if (result.ok)
         root.succeed(result.snapshot);
       else
@@ -401,9 +453,13 @@ BarWidget {
     id: guard
     repeat: false
     onTriggered: {
-      if (snapshotProc.running)
+      if (snapshotProc.running) {
         snapshotProc.running = false;   // terminates the child
+        snapshotKill.restart();         // …and kills it if it ignores that
+      }
       internal.inFlight = false;
+      internal.snapshotOut = "";
+      internal.snapshotOverflow = false;
       root.fail("HubDev did not answer in time");
     }
   }
@@ -414,17 +470,38 @@ BarWidget {
   // reassign `command` under a running child.
   Process {
     id: actionProc
-    command: ["hubdev", "service:list"]   // replaced per-request
+    command: ["/usr/bin/hubdev", "service:list"]   // replaced per-request
 
-    stdout: StdioCollector {
-      waitForEnd: true
+    // Same budget rule as the snapshot process, smaller ceiling — see there.
+    stdout: SplitParser {
+      splitMarker: ""
+      onRead: function (chunk) {
+        if (internal.actionOverflow)
+          return;
+        internal.actionOut += chunk;
+        if (internal.actionOut.length > root.actionMaxBytes) {
+          internal.actionOverflow = true;
+          internal.actionOut = "";
+          actionProc.signal(15);
+          actionKill.restart();
+        }
+      }
     }
 
     onExited: function (exitCode) {
       actionGuard.stop();
+      actionKill.stop();
+      var out = internal.actionOut;
+      var overflowed = internal.actionOverflow;
+      internal.actionOut = "";
+      internal.actionOverflow = false;
+      if (overflowed) {
+        root.finishAction(false, "HubDev returned more output than this widget will read");
+        return;
+      }
       // HubDev prints the reason on STDOUT, not stderr, and colours it with
       // ANSI unconditionally — Actions.parseResult is where both facts live.
-      var result = Actions.parseResult(stdout.text, exitCode);
+      var result = Actions.parseResult(out, exitCode);
       root.finishAction(result.ok, result.message);
     }
   }
@@ -439,10 +516,32 @@ BarWidget {
     id: actionGuard
     repeat: false
     onTriggered: {
-      if (actionProc.running)
+      if (actionProc.running) {
         actionProc.running = false;   // terminates the child
+        actionKill.restart();         // …and kills it if it ignores that
+      }
+      internal.actionOut = "";
+      internal.actionOverflow = false;
       root.finishAction(false, (internal.actionState.label || "That") + " did not finish in time");
     }
+  }
+
+  // TERM is a request. These are the escalation halves of the two overflow
+  // paths and of the guard timers: two seconds after the polite signal, the
+  // child is killed. Without them a `hubdev` ignoring SIGTERM would keep
+  // writing into a pipe nobody reads.
+  Timer {
+    id: snapshotKill
+    interval: 2000
+    repeat: false
+    onTriggered: if (snapshotProc.running) snapshotProc.signal(9)
+  }
+
+  Timer {
+    id: actionKill
+    interval: 2000
+    repeat: false
+    onTriggered: if (actionProc.running) actionProc.signal(9)
   }
 
   Timer {
@@ -575,5 +674,16 @@ BarWidget {
         return;
       root.toggle();
     }
+  }
+
+  // A widget can be destroyed while a child is still running — the bar slot is
+  // rebuilt on a layout change, the plugin is disabled, the shell restarts.
+  // Neither Process is detached, so ending them here is what keeps "this plugin
+  // leaves nothing behind" true rather than merely likely.
+  Component.onDestruction: {
+    if (snapshotProc.running)
+      snapshotProc.signal(15);
+    if (actionProc.running)
+      actionProc.signal(15);
   }
 }
