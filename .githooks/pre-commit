@@ -1,4 +1,7 @@
 #!/bin/sh
-# Refuse to commit anything this public repo must not carry.
+# Refuse to commit anything this public repo must not carry, or that
+# `omarchy plugin add` would refuse to install.
 # Enable once per clone:  git config core.hooksPath .githooks
-exec node "$(git rev-parse --show-toplevel)/tools/privacy-scan.mjs" --staged
+top="$(git rev-parse --show-toplevel)"
+node "$top/tools/privacy-scan.mjs" --staged || exit 1
+exec node "$top/tools/validate.mjs"

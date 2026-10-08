@@ -23,7 +23,7 @@ Each of those three is a HubDev verb (`site:terminal`, `folder`, `edit`), and ea
 *your* default rather than naming a program: the terminal from `$TERMINAL`, the file manager
 from `xdg-open`, the editor from `omarchy-launch-editor` — the same reasoning that makes the
 browser action `omarchy-launch-browser`. They are the three that need no machinery: detached,
-no output anyone reads, nothing destructive, no chance of a sudo prompt. `Actions.js` holds
+no output anyone reads, nothing destructive, no chance of a password prompt. `Actions.js` holds
 the allowlist and the argv, and node tests it — including the refusals, because `hubdev`
 parses its own flags out of the argv it is handed and a site named `--print` must never
 become one.
@@ -88,21 +88,20 @@ bug for a control that runs things.
 **Bind it to a key.** The panel is reachable without going to the bar at all:
 
 ```bash
-omarchy-shell shell toggle io.hubdev.buddy
+omarchy-shell io.hubdev.buddy toggle      # also: open, close, refresh
 ```
 
 In `~/.config/hypr/bindings.lua`, alongside Omarchy's own panel keys:
 
 ```lua
-o.bind("SUPER + CTRL + J", "HubDev Buddy", "omarchy-shell shell toggle io.hubdev.buddy")
+o.bind("SUPER + CTRL + J", "HubDev Buddy", "omarchy-shell io.hubdev.buddy toggle")
 ```
 
-`shell toggle` is deliberate rather than this plugin's own IPC route: it resolves the widget
-through `Bar.pickPanelSlot`, so on a multi-monitor desk the panel opens on the output Hyprland
-has focused instead of on every head at once. It lands on the current workspace because the
-bar is a layer surface and has no workspace of its own. The panel takes the keyboard as it
-maps, so a summon runs straight into the search box — press the key, type three letters of a
-project, `Enter`.
+`open`, `close` and `toggle` act on exactly one panel, the one on the output Hyprland has
+focused, so on a multi-monitor desk the panel does not open on every head at once. It lands on
+the current workspace because the bar is a layer surface and has no workspace of its own. The
+panel takes the keyboard as it maps, so a summon runs straight into the search box — press the
+key, type three letters of a project, `Enter`.
 
 That route was dead until Phase 4d, for one reason worth writing down. `Bar.findPanelWidget`
 and `Bar.panelNavigationSlots` both skip any bar slot whose item is missing `open()`, `close()`
@@ -144,7 +143,7 @@ any git URL, and this repository is one.
 | Omarchy | **Quattro 4.0.x** or newer (`omarchy version`). The plugin is a Quickshell `bar-widget`; the pre-Quattro Waybar setup cannot host it. |
 | HubDev | **v1.29.0** or newer, installed at `/usr/bin/hubdev` (`hubdev --version`). That is the release where `hubdev snapshot --json` — the one thing the widget reads — shipped. |
 
-Nothing else. No API key, no account, no daemon, no build step, no `sudo` at install time.
+Nothing else. No API key, no account, no daemon, no build step, no password prompt at install time.
 
 **Install**
 
@@ -171,7 +170,7 @@ The mark appears in the bar. Click it, or bind a key to the panel:
 
 ```lua
 -- ~/.config/hypr/bindings.lua
-o.bind("SUPER CTRL", "H", "omarchy-shell io.hubdev.buddy toggle")
+o.bind("SUPER + CTRL + J", "HubDev Buddy", "omarchy-shell io.hubdev.buddy toggle")
 ```
 
 **Updating**
@@ -249,10 +248,8 @@ separately if that is what you meant (`hubdev` is packaged as `hubdev-bin`).
 
 ## What is here
 
-| Path | |
-|---|---|
-This repository is the plugin and nothing else: the QML, the three `.js` modules the logic
-lives in, the tests, the README and the licence. `omarchy plugin add` copies a repository
+This repository is the plugin and nothing else: the QML, the `.js` modules the logic
+lives in, the tests, the README, the contributor guide and the licence. `omarchy plugin add` copies a repository
 verbatim into `~/.config/omarchy/plugins/`, so anything here is installed on your machine —
 which is a good reason for there to be very little of it.
 
@@ -296,37 +293,13 @@ plan: `hubdev service:list` costs **568 ms** with containers running (6.5× the 
 which moved it out of the cheap polling tier; and `site:fix` was cut from the action allowlist
 because it can raise a polkit dialog that blocks the shell's `Process`. Plan §7.1–§7.3.
 
-## Layout
+## Contributing
 
-```
-manifest.json                     io.hubdev.buddy, schemaVersion 1
-BarWidget.qml                     the only file that does I/O
-Mark.qml                          the glyph and its state dot
-SourceJson.js                     the transport seam (the import line is the seam)
-Model.js  Theme.js                pure JS, QML-free, tested under node
-Panel.qml                         the popout: header, search, view, hand-offs
-KeyCatcher.qml                    the panel's keys — why it is not qs.Ui's is at its top
-SearchField.qml                   the box that appears with the first keystroke
-DenseView.qml  ColumnsView.qml    two arrangements of the same sections
-*Section.qml                      Sites · Services · Environment · Attention · Extras
-Section.qml  InfoRow.qml  SiteRow.qml  ServiceRow.qml  StatusDot.qml  CollapseRow.qml
-Actions.js                        the argv allowlist, and the keyboard's map of what it can reach
-test/                             node --test, harness + 11 fixtures
-LICENSE                           MIT
-tools/hubdev-snapshot             dev-only reference implementation of the contract,
-                                  written before the Go one and kept as its acceptance target
-                                  ── still to come ──
-(Phase 5 only: preview.png, CI running validate + qmllint + node --test,
- and the marketplace submission)
-```
-
-`test/hardening.test.mjs` is the odd one out: it asserts properties of the *tree* rather than
-of a function — every `Text` names its `textFormat`, no `StdioCollector` exists anywhere,
-`hubdev` is only ever invoked by absolute path — because each of those is something a later
-edit could undo without any test noticing.
-
-`test/harness.mjs` loads the real `.js` files into node, stripping only QML's `.pragma`
-directive, so the tests run exactly what the shell loads and there is no second copy to drift.
+Start with [`CONTRIBUTING.md`](CONTRIBUTING.md): the first ten minutes, an architecture diagram,
+a map of the repository, where each kind of change goes, the dev loop, and the rules that are
+easy to break. The short version: there is no build step, `npm run check` runs the tests and
+the same manifest validation `omarchy plugin add` applies, and a `.qml` edit needs
+`omarchy restart shell` before it shows.
 
 ## Reading the plan
 
@@ -351,7 +324,8 @@ both carry assertions) without naming anything real.
 names and secret-shaped values, and `npm test` runs the same scan. The denylist
 is **hashed**, not plaintext: a scanner carrying a list of client names would be
 the leak it exists to prevent. To have git refuse the commit instead of CI
-refusing the push, enable the hook once per clone:
+refusing the push, enable the hook once per clone. It runs this scan and
+`npm run validate`, the same manifest check `omarchy plugin add` applies:
 
 ```
 git config core.hooksPath .githooks

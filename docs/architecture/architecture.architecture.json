@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "HubDev Buddy",
+    "subtitle": "Omarchy bar widget: one file does I/O, pure JS decides, node --test runs the same JS",
+    "output": "architecture.html"
+  },
+  "components": [
+    { "id": "hubdev", "type": "external", "label": "/usr/bin/hubdev", "sublabel": "snapshot --json · verbs", "pos": [30, 390], "size": [160, 64], "tag": "the HubDev CLI" },
+    { "id": "tests", "type": "cloud", "label": "node --test", "sublabel": "test/harness.mjs", "pos": [665, 10], "size": [130, 60], "tag": "fixtures = contract" },
+    { "id": "actions", "type": "security", "label": "Actions.js", "sublabel": "allowlist, parseResult", "pos": [290, 190], "size": [140, 60] },
+    { "id": "source", "type": "backend", "label": "SourceJson.js", "sublabel": "the transport seam", "pos": [440, 190], "size": [150, 60], "tag": "cheap 5s · full 15s" },
+    { "id": "model", "type": "backend", "label": "Model.js", "sublabel": "merge, rows, summary", "pos": [660, 190], "size": [140, 60] },
+    { "id": "theme", "type": "backend", "label": "Theme.js", "sublabel": "level colours, glyphs", "pos": [850, 190], "size": [140, 60] },
+    { "id": "widget", "type": "messagebus", "label": "BarWidget.qml", "sublabel": "the only file with I/O", "pos": [440, 390], "size": [150, 64], "tag": "Process + SplitParser" },
+    { "id": "panel", "type": "frontend", "label": "Panel.qml", "sublabel": "keys, search, views", "pos": [660, 390], "size": [140, 64] },
+    { "id": "rows", "type": "frontend", "label": "*Section / *Row", "sublabel": "signals up, no I/O", "pos": [850, 390], "size": [140, 64] },
+    { "id": "mark", "type": "frontend", "label": "Mark.qml", "sublabel": "glyph + state dot", "pos": [660, 570], "size": [140, 60], "tag": "dot only when wrong" },
+    { "id": "desktop", "type": "external", "label": "Desktop launchers", "sublabel": "browser, terminal, edit", "pos": [30, 570], "size": [160, 60] },
+    { "id": "settings", "type": "database", "label": "shell.json", "sublabel": "view, refresh interval", "pos": [330, 740], "size": [160, 60] },
+    { "id": "ipc", "type": "external", "label": "IPC", "sublabel": "io.hubdev.buddy toggle", "pos": [540, 740], "size": [170, 60] }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "omarchy-shell (Quickshell process), one widget per monitor",
+      "wraps": ["actions", "source", "model", "theme", "widget", "panel", "rows", "mark"],
+      "pad": 60
+    },
+    {
+      "kind": "security-group",
+      "label": "pure JS, no QML imports, no I/O",
+      "wraps": ["actions", "source", "model", "theme"]
+    }
+  ],
+  "connections": [
+    { "from": "hubdev", "to": "widget", "label": "Process: snapshot | verb", "variant": "emphasis" },
+    { "from": "widget", "to": "panel", "label": "summary", "variant": "emphasis" },
+    { "from": "panel", "to": "rows" },
+    { "from": "widget", "to": "source", "fromSide": "top", "toSide": "bottom", "labelDy": -6 },
+    { "from": "panel", "to": "model", "fromSide": "top", "toSide": "bottom" },
+    { "from": "rows", "to": "theme", "fromSide": "top", "toSide": "bottom" },
+    { "from": "tests", "to": "model", "label": "loads the same files", "variant": "dashed", "fromSide": "bottom", "toSide": "top", "labelDx": 70, "labelDy": 24 },
+    { "from": "widget", "to": "mark", "fromSide": "bottom", "toSide": "top", "route": "orthogonal-v" },
+    { "from": "widget", "to": "desktop", "label": "Util.execArgv, detached", "variant": "dashed", "fromSide": "bottom", "toSide": "top", "route": "orthogonal-v" },
+    { "from": "settings", "to": "widget", "label": "settings", "fromSide": "top", "toSide": "bottom", "route": "orthogonal-v" },
+    { "from": "ipc", "to": "widget", "label": "open | toggle", "fromSide": "top", "toSide": "bottom", "route": "orthogonal-v" }
+  ],
+  "cards": [
+    {
+      "dot": "amber",
+      "title": "Shell process",
+      "items": [
+        "BarWidget.qml: two Processes, each timed out",
+        "SplitParser drops output over a byte budget",
+        "Panel / Sections / Rows / Mark only draw",
+        "SiteRow > Section > Panel > BarWidget, by signal"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Pure JS",
+      "items": [
+        "Every rule lives in Model / Actions / Theme",
+        "No QML imports, so node can load them",
+        "Swap SourceJson.js to change the transport"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Two ways to act",
+      "items": [
+        "Detached: Util.execArgv opens URL, terminal, editor",
+        "Waited on: runAction for service, caddy, php verbs",
+        "argv only from the Actions.js allowlists",
+        "Exit code > Actions.parseResult > refusal in panel"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "When it asks",
+      "items": [
+        "Panel closed: full tier, refresh interval (30s)",
+        "Panel open: cheap tier every 5s, full every 30s",
+        "Unreachable: back off to 60s",
+        "merge(): absent keeps the last, [] means empty"
+      ]
+    }
+  ]
+}

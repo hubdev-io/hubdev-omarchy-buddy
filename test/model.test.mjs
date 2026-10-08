@@ -257,7 +257,7 @@ test("no summary can carry a password, key or token", () => {
   }));
   poisoned.license = { plan: "pro", status: "active", key: "LIC-SHOULD-NOT-APPEAR" };
 
-  const rendered = renderedStrings(Model.summarize(poisoned)).join(" ");
+  const rendered = renderedStrings(Model.summarize(poisoned)).join("\x00");
   assert.ok(!rendered.includes("SHOULD-NOT-APPEAR"), "a secret reached the summary");
 });
 

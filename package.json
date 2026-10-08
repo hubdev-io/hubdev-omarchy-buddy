@@ -7,6 +7,8 @@
   "type": "module",
   "scripts": {
     "test": "node --test 'test/*.test.mjs'",
-    "privacy": "node tools/privacy-scan.mjs"
+    "privacy": "node tools/privacy-scan.mjs",
+    "validate": "node tools/validate.mjs",
+    "check": "npm test && npm run validate"
   }
 }
