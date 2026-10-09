@@ -318,6 +318,7 @@ BarWidget {
   function pollState() {
     return {
       open: root.opened,
+      idleMs: Number(root.setting("refreshIntervalSec", 30)) * 1000,
       consecutiveFailures: internal.consecutiveFailures,
       msSinceFullRefresh: root.msNow() - internal.lastFullRefreshMs
     };

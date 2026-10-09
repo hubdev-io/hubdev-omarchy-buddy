@@ -106,21 +106,32 @@ var IDLE_MS = 30000;
 var OPEN_MS = 5000;
 var BACKOFF_CAP_MS = 60000;
 
+// The closed-panel interval is the user's `refreshIntervalSec` setting, passed
+// in as `idleMs`. Anything outside the manifest's own 5..600s range -- a typo
+// in shell.json, a string, a negative -- falls back to the default rather than
+// polling every millisecond or never.
+function idleMsFor(state) {
+  var ms = state && state.idleMs;
+  return typeof ms === "number" && isFinite(ms) && ms >= 5000 && ms <= 600000 ? ms : IDLE_MS;
+}
+
 // How long to wait before the next poll.
 //
 //  - open panel  -> 5s, but only the cheap tier (the caller alternates)
-//  - closed      -> 30s
-//  - unreachable -> exponential backoff to 60s, so a machine without HubDev
-//                   installed is not spawning a doomed process every 30s
-//                   forever.
+//  - closed      -> the refresh interval setting, 30s by default
+//  - unreachable -> exponential backoff from 30s (or from the interval, when
+//                   it is longer), capped at 60s (or at the interval), so a
+//                   machine without HubDev installed is not spawning a doomed
+//                   process on every tick forever -- even at a 5s setting.
 function intervalFor(state) {
   var s = state || {};
+  var idle = idleMsFor(s);
   var failures = typeof s.consecutiveFailures === "number" ? s.consecutiveFailures : 0;
   if (failures > 0) {
-    var backoff = IDLE_MS * Math.pow(2, failures - 1);
-    return Math.min(backoff, BACKOFF_CAP_MS);
+    var backoff = Math.max(idle, IDLE_MS) * Math.pow(2, failures - 1);
+    return Math.min(backoff, Math.max(BACKOFF_CAP_MS, idle));
   }
-  return s.open ? OPEN_MS : IDLE_MS;
+  return s.open ? OPEN_MS : idle;
 }
 
 // Which tier this tick should ask for. The expensive blocks refresh on a 30s

@@ -108,6 +108,25 @@ test("failures back off exponentially and cap at 60s", () => {
   for (const ms of seen) assert.ok(ms >= 30000);
 });
 
+test("the closed interval follows the refreshIntervalSec setting", () => {
+  assert.equal(Source.intervalFor({ open: false, idleMs: 120000 }), 120000);
+  assert.equal(Source.intervalFor({ open: false, idleMs: 5000 }), 5000);
+  // The open panel keeps its own pace whatever the setting says.
+  assert.equal(Source.intervalFor({ open: true, idleMs: 120000 }), 5000);
+});
+
+test("an out-of-range or malformed setting falls back to 30s", () => {
+  for (const idleMs of [0, -1000, 4999, 600001, NaN, Infinity, "60000", null])
+    assert.equal(Source.intervalFor({ open: false, idleMs }), 30000, String(idleMs));
+});
+
+test("backoff never runs faster than 30s, and never slower than a long setting", () => {
+  const fast = [1, 2, 3].map((f) => Source.intervalFor({ open: false, idleMs: 5000, consecutiveFailures: f }));
+  assert.deepEqual(fast, [30000, 60000, 60000]);
+  const slow = [1, 2, 3].map((f) => Source.intervalFor({ open: false, idleMs: 300000, consecutiveFailures: f }));
+  assert.deepEqual(slow, [300000, 300000, 300000]);
+});
+
 test("intervalFor tolerates a missing or partial state", () => {
   for (const s of [undefined, null, {}, { open: true }, { consecutiveFailures: 1 }])
     assert.ok(Source.intervalFor(s) >= 5000);
